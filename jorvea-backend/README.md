@@ -53,7 +53,7 @@ Node.js backend for converting videos to HLS format with adaptive streaming.
 
    **Verify installation**:
    ```bash
-   ffmpeg -versionSet-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+   ffmpeg -version
    ```
 
 4. **Configure environment variables**:

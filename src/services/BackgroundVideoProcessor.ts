@@ -261,13 +261,9 @@ class BackgroundVideoProcessor {
     onProgress?: (progress: number) => void
   ): Promise<{ hlsUrl: string; thumbnailUrl: string }> {
     try {
-      // IMPORTANT: Replace with your actual backend URL
-      // Options:
-      // 1. Vercel: https://your-app.vercel.app
-      // 2. DigitalOcean: https://your-droplet-ip:3000
-      // 3. Railway: https://your-app.up.railway.app
-      // 4. Render: https://your-app.onrender.com
-      const BACKEND_URL = 'http://localhost:3000'; // ⚠️ CHANGE THIS!
+      // ✅ DigitalOcean App Platform - HLS Conversion Backend
+      // Deployed and LIVE! 🚀
+      const BACKEND_URL = 'https://jorvea-jgg3d.ondigitalocean.app';
 
       console.log('📤 Uploading to backend:', BACKEND_URL);
 
