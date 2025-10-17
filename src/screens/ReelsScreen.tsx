@@ -45,6 +45,8 @@ import FreeVideoPlayer from '../components/FreeVideoPlayer';
 import InstagramVideoPlayer from '../components/InstagramVideoPlayer';
 import InstagramReelPreloader from '../services/InstagramReelPreloader';
 import FastReelPreloader from '../services/FastReelPreloader';
+import PerfectReelsFeedAlgorithm from '../services/PerfectReelsFeedAlgorithm';
+import PerfectViewTrackingSystem from '../services/PerfectViewTrackingSystem';
 
 import PerfectChunkedStreamingEngine from '../services/PerfectChunkedStreamingEngine';
 import PerfectInstantThumbnailSystem from '../services/PerfectInstantThumbnailSystem';
@@ -159,22 +161,28 @@ const OptimizedReelItem: React.FC<ReelItemProps> = React.memo(({
   const doubleTapTimeout = useRef<NodeJS.Timeout | null>(null);
   const lastTapTime = useRef(0);
   const viewTracked = useRef(false); // Track if view has been counted
+  const watchStartTime = useRef<number>(0); // Track when user started watching
   const volumeIndicatorAnimation = useRef(new Animated.Value(0)).current;
   const playPauseIndicatorAnimation = useRef(new Animated.Value(0)).current;
   const seekForwardAnimation = useRef(new Animated.Value(0)).current;
 
-  // Auto-play when reel becomes active (UNMUTED by default) and handle pause state
+  // 🎯 PERFECT VIEW TRACKING - Track watch time and count once
   useEffect(() => {
     if (isActive && !isPaused) {
       setIsPlaying(true);
       
-      // Only count view once per reel
+      // Record start time when user starts watching
+      if (!viewTracked.current && watchStartTime.current === 0) {
+        watchStartTime.current = Date.now();
+      }
+      
+      // Count view after 3 seconds of watching
       if (!viewTracked.current) {
-        // Add delay before counting view to ensure user actually watches
         const viewTimer = setTimeout(() => {
-          onViewCountUpdate(reel.id);
+          const watchTime = Date.now() - watchStartTime.current;
+          onViewCountUpdate(reel.id, watchTime);
           viewTracked.current = true;
-        }, 2000); // 2 second delay
+        }, 3000); // 3 second delay (minimum watch time)
         
         return () => clearTimeout(viewTimer);
       }
@@ -190,6 +198,7 @@ const OptimizedReelItem: React.FC<ReelItemProps> = React.memo(({
   // Reset view tracking when reel changes
   useEffect(() => {
     viewTracked.current = false;
+    watchStartTime.current = 0;
   }, [reel.id]);
 
   const formatCount = (count: number): string => {
@@ -987,6 +996,10 @@ const ReelsScreen: React.FC = () => {
   // Initialize dynamic save archive service
   const dynamicSaveArchiveService = useMemo(() => new DynamicSaveArchiveService(), []);
 
+  // 🎯 Initialize Perfect Feed Algorithm & View Tracking System
+  const feedAlgorithm = useMemo(() => PerfectReelsFeedAlgorithm.getInstance(), []);
+  const viewTracker = useMemo(() => PerfectViewTrackingSystem.getInstance(), []);
+
   // 🚀 Initialize Perfect Chunked Streaming System + Advanced Segmented Fetcher + Instant Preloader
   const perfectChunkedEngine = useMemo(() => new PerfectChunkedStreamingEngine(), []);
   const perfectThumbnailSystem = useMemo(() => new PerfectInstantThumbnailSystem(), []);
@@ -1111,6 +1124,25 @@ const ReelsScreen: React.FC = () => {
 
     executePerfectPrefetch();
   }, [currentIndex, reels, perfectChunkedEngine, perfectThumbnailSystem]);
+
+  // 🎯 Initialize Perfect Feed Algorithm & View Tracking System
+  useEffect(() => {
+    const initializePerfectSystems = async () => {
+      if (user?.uid) {
+        console.log('🎯 Initializing Perfect Feed Algorithm & View Tracking...');
+        
+        // Initialize feed algorithm
+        await feedAlgorithm.initialize(user.uid);
+        
+        // Initialize view tracker
+        await viewTracker.initialize(user.uid);
+        
+        console.log('✅ Perfect systems initialized!');
+      }
+    };
+
+    initializePerfectSystems();
+  }, [user?.uid, feedAlgorithm, viewTracker]);
 
   // Initialize instant loading - load only first reel for instant display with ULTRA-DYNAMIC optimizations
   useEffect(() => {
@@ -1901,15 +1933,33 @@ const ReelsScreen: React.FC = () => {
     }
   }, [navigation]);
 
-  // Handle view count update with optimistic updates and watch history tracking
-  const handleViewCountUpdate = useCallback(async (reelId: string) => {
+  // 🎯 PERFECT VIEW TRACKING - One view per user per reel, forever
+  const handleViewCountUpdate = useCallback(async (reelId: string, watchTime: number = 3000) => {
     try {
-      await FirebaseService.incrementReelViews(reelId);
+      if (!user?.uid) return;
+
+      const viewTracker = PerfectViewTrackingSystem.getInstance();
       
-      // Track in smart feed service for personalized recommendations
-      if (user?.uid) {
-        const smartFeedService = SmartReelFeedService.getInstance();
-        smartFeedService.markReelAsWatched(user.uid, reelId);
+      // Check if already viewed
+      if (viewTracker.hasViewed(reelId)) {
+        console.log(`⏭️ Reel ${reelId} already viewed - skipping`);
+        return;
+      }
+
+      // Track view with anti-bot measures
+      const result = await viewTracker.trackView(reelId, user.uid, watchTime);
+      
+      if (result.success) {
+        console.log(`✅ View counted for reel ${reelId}`);
+        
+        // Mark as viewed in feed algorithm
+        const feedAlgorithm = PerfectReelsFeedAlgorithm.getInstance();
+        await feedAlgorithm.markAsViewed(user.uid, reelId);
+        
+        // Track interaction for better recommendations
+        await feedAlgorithm.trackInteraction(user.uid, reelId, 'viewed', watchTime);
+      } else {
+        console.log(`⚠️ View not counted: ${result.reason}`);
       }
     } catch (error) {
       console.error('Error updating view count:', error);

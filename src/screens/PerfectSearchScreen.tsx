@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import FirebaseService from '../services/firebaseService';
 import { Post, User, Reel, RootStackParamList } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -74,14 +75,35 @@ const PerfectSearchScreen: React.FC = () => {
   const loadExploreContent = async () => {
     try {
       setInitialLoading(true);
+      
+      // Load from cache INSTANTLY for immediate display
+      const cachedPosts = await AsyncStorage.getItem('explore_posts_cache');
+      const cachedReels = await AsyncStorage.getItem('explore_reels_cache');
+      
+      if (cachedPosts && cachedReels) {
+        setExplorePosts(JSON.parse(cachedPosts));
+        setExploreReels(JSON.parse(cachedReels));
+        console.log('⚡ Loaded explore content from cache instantly');
+      }
+      
+      // Fetch fresh content in background
       const [posts, reels] = await Promise.all([
         FirebaseService.getAllPosts(),
         FirebaseService.getAllReels()
       ]);
       
       // Shuffle for variety
-      setExplorePosts(shuffleArray(posts).slice(0, 50));
-      setExploreReels(shuffleArray(reels).slice(0, 50));
+      const shuffledPosts = shuffleArray(posts).slice(0, 50);
+      const shuffledReels = shuffleArray(reels).slice(0, 50);
+      
+      setExplorePosts(shuffledPosts);
+      setExploreReels(shuffledReels);
+      
+      // Update cache
+      await AsyncStorage.setItem('explore_posts_cache', JSON.stringify(shuffledPosts));
+      await AsyncStorage.setItem('explore_reels_cache', JSON.stringify(shuffledReels));
+      console.log('✅ Updated explore content cache');
+      
     } catch (error) {
       console.error('Error loading explore content:', error);
     } finally {

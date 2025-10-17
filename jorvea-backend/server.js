@@ -26,6 +26,9 @@ const FFmpegConverter = require('./services/ffmpeg-converter');
 const UploadService = require('./services/upload-service');
 const NotificationService = require('./services/notification-service');
 
+// Import analytics routes
+const reelsAnalyticsRouter = require('./routes/reels-analytics');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -33,6 +36,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Mount analytics routes
+app.use('/api/reels', reelsAnalyticsRouter);
 
 // Configure multer for file uploads
 const upload = multer({

@@ -306,7 +306,7 @@ export default function ChatScreen({ route }: ChatScreenProps): React.JSX.Elemen
     try {
       console.log('🔄 ChatScreen: Loading messages for chat:', chatId);
       
-      // Check cache first for instant loading
+      // Check cache first for INSTANT loading
       const now = Date.now();
       const cacheKey = `messages_${chatId}`;
       const lastCacheTime = messageCacheTime.get(cacheKey) || 0;
@@ -318,8 +318,8 @@ export default function ChatScreen({ route }: ChatScreenProps): React.JSX.Elemen
         setMessages(cachedMessages);
       }
       
-      // Load fresh messages from Firebase
-      const messagesData = await FirebaseService.getMessages(chatId, 50);
+      // Load ONLY last 20 messages from Firebase (Instagram-style)
+      const messagesData = await FirebaseService.getMessages(chatId, 20);
       
       // Validate and process messages with support for shared content
       const validMessages = messagesData.filter(msg => {
@@ -337,7 +337,7 @@ export default function ChatScreen({ route }: ChatScreenProps): React.JSX.Elemen
         return hasValidContent && hasValidSender;
       });
 
-      console.log('📊 ChatScreen: Valid messages loaded:', validMessages.length);
+      console.log(`📊 ChatScreen: Loaded last ${validMessages.length} messages (Instagram-style)`);
       setMessages(validMessages); // Keep Firebase order (newest first), FlatList will reverse it
       
       // Update cache
@@ -364,8 +364,8 @@ export default function ChatScreen({ route }: ChatScreenProps): React.JSX.Elemen
         .collection(COLLECTIONS.MESSAGES)
         .where('chatId', '==', chatId)
         .where('participants', 'array-contains', user.uid)
-        .orderBy('createdAt', 'asc')
-        .limit(50)
+        .orderBy('createdAt', 'desc')
+        .limit(20)
         .onSnapshot(
           snapshot => {
             const newMessages = snapshot.docs.map(doc => {
@@ -429,8 +429,8 @@ export default function ChatScreen({ route }: ChatScreenProps): React.JSX.Elemen
               unsubscribe = firebaseFirestore
                 .collection(COLLECTIONS.MESSAGES)
                 .where('chatId', '==', chatId)
-                .orderBy('createdAt', 'asc')
-                .limit(50)
+                .orderBy('createdAt', 'desc')
+                .limit(20)
                 .onSnapshot(
                   snapshot => {
                     const newMessages = snapshot.docs
