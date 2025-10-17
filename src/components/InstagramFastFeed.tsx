@@ -24,6 +24,7 @@ import { Post as TypesPost } from '../types';
 import { Post as FirebasePost, Story as FirebaseStory } from '../services/firebaseService';
 import FirebaseService from '../services/firebaseService';
 import UltraFastPostService from '../services/UltraFastPostService';
+import RealTimeLikeSystem from '../services/RealTimeLikeSystem';
 import { EnhancedPostCard } from '../components/EnhancedPostCard';
 import StoryViewer from '../components/StoryViewer';
 import StoryCreator from '../components/StoryCreator';
@@ -146,11 +147,24 @@ const PostItem = memo<{ post: TypesPost; index: number }>(({ post, index }) => {
     if (!user?.uid) return;
     
     try {
-      const ultraFastPostService = UltraFastPostService.getInstance();
-      const result = await ultraFastPostService.togglePostLike(postId, user.uid);
-      console.log(`Post ${result.isLiked ? 'liked' : 'unliked'}: ${result.likesCount} total likes`);
+      console.log('❤️ RealTimeLike: Starting like toggle for post:', postId);
+      
+      // Use RealTimeLikeSystem for perfect like handling (same as ReelsScreen)
+      const result = await RealTimeLikeSystem.getInstance().toggleLike(
+        postId,
+        user.uid,
+        'post',
+        false, // We'll let the system determine current state
+        0      // We'll let the system fetch current count
+      );
+
+      if (result.success) {
+        console.log(`✅ RealTimeLike: Post ${postId} ${result.isLiked ? 'liked' : 'unliked'}. Count: ${result.likesCount}`);
+      } else {
+        console.log('⚠️ RealTimeLike: Like operation failed:', result.error);
+      }
     } catch (error) {
-      console.error('Error liking post:', error);
+      console.error('❌ RealTimeLike: Error liking post:', error);
     }
   }, [user?.uid]);
 

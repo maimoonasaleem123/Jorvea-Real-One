@@ -9,7 +9,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/FastAuthContext';
 
 // Import main screens (we'll create these)
-import FastHomeScreen from '../screens/FastHomeScreen';
+import UltraFastHomeScreen from '../screens/UltraFastHomeScreen';
 import ProgressiveSearchScreen from '../screens/ProgressiveSearchScreen';
 import PerfectSearchScreen from '../screens/PerfectSearchScreen';
 import CreateScreen from '../screens/CreateScreen';
@@ -119,7 +119,7 @@ function MainTabNavigator(): React.JSX.Element {
       >
         <Tab.Screen
           name="Home"
-          component={FastHomeScreen}
+          component={UltraFastHomeScreen}
           options={{}}
         />
         <Tab.Screen

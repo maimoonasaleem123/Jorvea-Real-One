@@ -62,19 +62,16 @@ export const InstagramFastPostsProvider: React.FC<InstagramFastPostsProviderProp
       loadingRef.current = true;
       setError(null);
 
-      // Load only 2 posts initially for instant display
-      const fetchedPosts = await FirebaseService.getPosts(undefined, INITIAL_LOAD_SIZE);
+      // Load personalized feed with followed users' posts first (Instagram-style)
+      const fetchedPosts = await FirebaseService.getPersonalizedFeed(user.uid, INITIAL_LOAD_SIZE);
       const convertedPosts = fetchedPosts.map(convertFirebasePostToPost);
       
-      // Sort by newest first (Instagram-like)
-      const sortedPosts = convertedPosts.sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-
-      setPosts(sortedPosts);
-      lastPostIdRef.current = sortedPosts[sortedPosts.length - 1]?.id;
+      // Posts are already sorted by the personalized feed algorithm
+      setPosts(convertedPosts);
+      lastPostIdRef.current = convertedPosts[convertedPosts.length - 1]?.id;
       setHasMore(true); // Always assume more posts for lazy loading
 
+      console.log(`✅ Loaded ${convertedPosts.length} personalized posts (followed users first)`);
     } catch (err) {
       console.error('Error loading initial posts:', err);
       setError('Failed to load posts');
@@ -85,13 +82,14 @@ export const InstagramFastPostsProvider: React.FC<InstagramFastPostsProviderProp
 
   // Instagram-style lazy loading for additional posts
   const loadNextPage = useCallback(async () => {
-    if (loadingRef.current || !hasMore) return;
+    if (loadingRef.current || !hasMore || !user) return;
 
     try {
       loadingRef.current = true;
       setError(null);
 
-      const fetchedPosts = await FirebaseService.getPosts(lastPostIdRef.current, PAGE_SIZE);
+      // Load more personalized feed posts
+      const fetchedPosts = await FirebaseService.getPersonalizedFeed(user.uid, PAGE_SIZE);
       
       if (fetchedPosts.length === 0) {
         setHasMore(false);
@@ -113,42 +111,41 @@ export const InstagramFastPostsProvider: React.FC<InstagramFastPostsProviderProp
         setHasMore(false);
       }
 
+      console.log(`✅ Loaded ${convertedPosts.length} more personalized posts`);
     } catch (err) {
       console.error('Error loading posts:', err);
       setError('Failed to load posts');
     } finally {
       loadingRef.current = false;
     }
-  }, [hasMore, convertFirebasePostToPost]);
+  }, [hasMore, user, convertFirebasePostToPost]);
 
   // Instagram-style pull-to-refresh
   const refreshPosts = useCallback(async () => {
-    if (isRefreshing) return;
+    if (isRefreshing || !user) return;
 
     try {
       setIsRefreshing(true);
       setError(null);
       lastPostIdRef.current = undefined;
 
-      const fetchedPosts = await FirebaseService.getPosts(undefined, PAGE_SIZE);
+      // Load fresh personalized feed
+      const fetchedPosts = await FirebaseService.getPersonalizedFeed(user.uid, PAGE_SIZE);
       const convertedPosts = fetchedPosts.map(convertFirebasePostToPost);
       
-      // Sort by newest first (Instagram-like)
-      const sortedPosts = convertedPosts.sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-
-      setPosts(sortedPosts);
-      lastPostIdRef.current = sortedPosts[sortedPosts.length - 1]?.id;
+      // Posts are already sorted by the personalized feed algorithm
+      setPosts(convertedPosts);
+      lastPostIdRef.current = convertedPosts[convertedPosts.length - 1]?.id;
       setHasMore(fetchedPosts.length === PAGE_SIZE);
 
+      console.log(`✅ Refreshed ${convertedPosts.length} personalized posts`);
     } catch (err) {
       console.error('Error refreshing posts:', err);
       setError('Failed to refresh posts');
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, convertFirebasePostToPost]);
+  }, [isRefreshing, user, convertFirebasePostToPost]);
 
   // Instant optimistic updates like Instagram
   const addPost = useCallback((newPost: Post) => {

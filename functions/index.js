@@ -358,3 +358,183 @@ exports.healthCheck = functions.https.onRequest((req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+/**
+ * Scheduled Function: Clean up stories older than 24 hours
+ * Runs every hour to check and delete expired stories
+ * Deletes from both Firestore and Storage
+ */
+exports.cleanupExpiredStories = functions.pubsub
+  .schedule('every 1 hours')
+  .onRun(async (context) => {
+    console.log('🧹 Starting story cleanup...');
+    
+    try {
+      const now = admin.firestore.Timestamp.now();
+      const twentyFourHoursAgo = admin.firestore.Timestamp.fromMillis(
+        now.toMillis() - (24 * 60 * 60 * 1000)
+      );
+
+      // Query stories older than 24 hours
+      const storiesSnapshot = await admin
+        .firestore()
+        .collection('stories')
+        .where('createdAt', '<', twentyFourHoursAgo)
+        .get();
+
+      if (storiesSnapshot.empty) {
+        console.log('✅ No expired stories found');
+        return null;
+      }
+
+      console.log(`🗑️ Found ${storiesSnapshot.size} expired stories`);
+
+      // Delete each story
+      const deletePromises = storiesSnapshot.docs.map(async (doc) => {
+        const storyData = doc.data();
+        const batch = admin.firestore().batch();
+
+        try {
+          // Delete story document from Firestore
+          batch.delete(doc.ref);
+
+          // Delete story views subcollection
+          const viewsSnapshot = await doc.ref.collection('views').get();
+          viewsSnapshot.docs.forEach(viewDoc => {
+            batch.delete(viewDoc.ref);
+          });
+
+          // Commit Firestore deletions
+          await batch.commit();
+
+          // Delete media from Firebase Storage
+          if (storyData.mediaUrl) {
+            try {
+              // Extract storage path from URL
+              // Format: https://firebasestorage.googleapis.com/v0/b/bucket/o/path%2Fto%2Ffile.jpg?...
+              const urlParts = storyData.mediaUrl.split('/o/');
+              if (urlParts.length > 1) {
+                const filePath = decodeURIComponent(urlParts[1].split('?')[0]);
+                await admin.storage().bucket().file(filePath).delete();
+                console.log(`🗑️ Deleted storage file: ${filePath}`);
+              }
+            } catch (storageError) {
+              console.error('Error deleting storage file:', storageError.message);
+              // Continue even if storage delete fails
+            }
+          }
+
+          // Delete from Digital Ocean Spaces if using DO storage
+          if (storyData.mediaUrl && storyData.mediaUrl.includes('digitaloceanspaces.com')) {
+            try {
+              const urlObj = new URL(storyData.mediaUrl);
+              const key = urlObj.pathname.substring(1); // Remove leading /
+              
+              await s3.deleteObject({
+                Bucket: BUCKET_NAME,
+                Key: key
+              }).promise();
+              
+              console.log(`🗑️ Deleted DO Spaces file: ${key}`);
+            } catch (doError) {
+              console.error('Error deleting DO Spaces file:', doError.message);
+              // Continue even if DO delete fails
+            }
+          }
+
+          console.log(`✅ Deleted story ${doc.id}`);
+        } catch (error) {
+          console.error(`❌ Error deleting story ${doc.id}:`, error.message);
+        }
+      });
+
+      await Promise.all(deletePromises);
+      console.log(`✅ Cleanup complete! Deleted ${storiesSnapshot.size} stories`);
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Story cleanup failed:', error);
+      return null;
+    }
+  });
+
+/**
+ * HTTP Endpoint: Manual story cleanup trigger (for testing)
+ * GET /cleanupStories
+ */
+exports.manualCleanupStories = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  
+  console.log('🧹 Manual story cleanup triggered...');
+  
+  try {
+    const now = admin.firestore.Timestamp.now();
+    const twentyFourHoursAgo = admin.firestore.Timestamp.fromMillis(
+      now.toMillis() - (24 * 60 * 60 * 1000)
+    );
+
+    const storiesSnapshot = await admin
+      .firestore()
+      .collection('stories')
+      .where('createdAt', '<', twentyFourHoursAgo)
+      .get();
+
+    if (storiesSnapshot.empty) {
+      return res.json({
+        success: true,
+        message: 'No expired stories found',
+        deleted: 0
+      });
+    }
+
+    const deletePromises = storiesSnapshot.docs.map(async (doc) => {
+      const storyData = doc.data();
+      const batch = admin.firestore().batch();
+
+      try {
+        batch.delete(doc.ref);
+        const viewsSnapshot = await doc.ref.collection('views').get();
+        viewsSnapshot.docs.forEach(viewDoc => batch.delete(viewDoc.ref));
+        await batch.commit();
+
+        if (storyData.mediaUrl) {
+          try {
+            const urlParts = storyData.mediaUrl.split('/o/');
+            if (urlParts.length > 1) {
+              const filePath = decodeURIComponent(urlParts[1].split('?')[0]);
+              await admin.storage().bucket().file(filePath).delete();
+            }
+          } catch (e) {
+            console.error('Storage delete error:', e.message);
+          }
+
+          if (storyData.mediaUrl.includes('digitaloceanspaces.com')) {
+            try {
+              const urlObj = new URL(storyData.mediaUrl);
+              const key = urlObj.pathname.substring(1);
+              await s3.deleteObject({ Bucket: BUCKET_NAME, Key: key }).promise();
+            } catch (e) {
+              console.error('DO Spaces delete error:', e.message);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error deleting story ${doc.id}:`, error.message);
+      }
+    });
+
+    await Promise.all(deletePromises);
+
+    return res.json({
+      success: true,
+      message: `Deleted ${storiesSnapshot.size} expired stories`,
+      deleted: storiesSnapshot.size
+    });
+  } catch (error) {
+    console.error('Manual cleanup failed:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});

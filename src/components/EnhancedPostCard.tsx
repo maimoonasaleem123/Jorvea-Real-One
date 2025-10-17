@@ -400,8 +400,8 @@ export const EnhancedPostCard: React.FC<EnhancedPostCardProps> = ({
               disabled={likeAnimating}>
               <MaterialIcon
                 name={optimisticLikeState.isLiked ? "favorite" : "favorite-border"}
-                size={28}
-                color={optimisticLikeState.isLiked ? "#ff3040" : "#000"}
+                size={30}
+                color={optimisticLikeState.isLiked ? "#ff3040" : "#262626"}
               />
             </TouchableOpacity>
           </Animated.View>
@@ -410,19 +410,19 @@ export const EnhancedPostCard: React.FC<EnhancedPostCardProps> = ({
             style={styles.actionButton}
             onPress={() => onComment(post)}
           >
-            <Icon name="chatbubble-outline" size={24} color="#000" />
+            <Icon name="chatbubble-outline" size={28} color="#262626" />
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.actionButton}
             onPress={() => onShare(post)}
           >
-            <Icon name="paper-plane-outline" size={24} color="#000" />
+            <Icon name="paper-plane-outline" size={28} color="#262626" />
           </TouchableOpacity>
         </View>
         <SaveButton
           isSaved={post.isSaved || false}
           onPress={() => onSave(post.id)}
-          size={24}
+          size={28}
         />
       </View>
       
@@ -669,16 +669,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   leftActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 18,
   },
   actionButton: {
-    marginLeft: 16,
-    padding: 4,
+    padding: 6,
   },
   postInfo: {
     paddingHorizontal: 16,

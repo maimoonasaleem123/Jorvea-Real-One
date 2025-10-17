@@ -1954,6 +1954,8 @@ export class FirebaseService {
                 postData.user = userData;
               }
             }
+            // Check if user liked this post
+            postData.isLiked = await this.checkIfPostLiked(doc.id, userId);
             followingPosts.push(postData);
           }
         }
@@ -1982,6 +1984,8 @@ export class FirebaseService {
             postData.user = userData;
           }
         }
+        // Check if user liked this post
+        postData.isLiked = await this.checkIfPostLiked(doc.id, userId);
         discoverPosts.push(postData);
       }
       

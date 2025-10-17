@@ -90,9 +90,23 @@ const InstagramProfileReels: React.FC<InstagramProfileReelsProps> = ({
 
   // Generate thumbnails for reels without them
   const generateMissingThumbnails = useCallback(async (reelList: Reel[]) => {
-    const reelsNeedingThumbnails = reelList.filter(reel => !reel.thumbnailUrl);
+    // Check multiple possible thumbnail field names
+    const hasThumbnail = (reel: any) => {
+      return !!(
+        reel.thumbnailUrl || 
+        reel.thumbnail || 
+        reel.thumbnailURL || 
+        reel.coverUrl || 
+        reel.cover
+      );
+    };
     
-    if (reelsNeedingThumbnails.length === 0) return;
+    const reelsNeedingThumbnails = reelList.filter(reel => !hasThumbnail(reel));
+    
+    if (reelsNeedingThumbnails.length === 0) {
+      console.log('✅ All reels already have thumbnails');
+      return;
+    }
     
     console.log(`📸 Generating thumbnails for ${reelsNeedingThumbnails.length} reels`);
     
@@ -445,7 +459,26 @@ const InstagramProfileReels: React.FC<InstagramProfileReelsProps> = ({
   // Render reel grid item
   const renderReelItem = useCallback(({ item: reel, index }: { item: ReelWithThumbnail; index: number }) => {
     const isGeneratingThumbnail = thumbnailsGenerating.has(reel.id);
-    const thumbnailUri = reel.thumbnailUrl || reel.videoUrl;
+    
+    // Try multiple thumbnail field names (handle different schemas)
+    const getThumbnailUrl = () => {
+      // Check all possible thumbnail field names
+      if (reel.thumbnailUrl) return reel.thumbnailUrl;
+      if ((reel as any).thumbnail) return (reel as any).thumbnail;
+      if ((reel as any).thumbnailURL) return (reel as any).thumbnailURL;
+      if ((reel as any).coverUrl) return (reel as any).coverUrl;
+      if ((reel as any).cover) return (reel as any).cover;
+      
+      // Fallback: Use video URL with thumbnail query parameter
+      if (reel.videoUrl) {
+        // For videos, we can use the video URL as fallback (video player will show first frame)
+        return reel.videoUrl;
+      }
+      
+      return null;
+    };
+    
+    const thumbnailUri = getThumbnailUrl();
     
     return (
       <TouchableOpacity
@@ -454,13 +487,19 @@ const InstagramProfileReels: React.FC<InstagramProfileReelsProps> = ({
         onLongPress={() => handleReelLongPress(reel)}
         activeOpacity={0.8}
       >
-        <Image
-          source={{ 
-            uri: thumbnailUri,
-          }}
-          style={styles.gridImage}
-          resizeMode="cover"
-        />
+        {thumbnailUri ? (
+          <Image
+            source={{ 
+              uri: thumbnailUri,
+            }}
+            style={styles.gridImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.gridImage, styles.placeholderContainer]}>
+            <Icon name="videocam" size={32} color="#999" />
+          </View>
+        )}
         
         {/* Privacy indicator */}
         {reel.isPrivate && isOwnProfile && (
@@ -854,6 +893,11 @@ const styles = StyleSheet.create({
     padding: 6,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  placeholderContainer: {
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   fullscreenContainer: {
     flex: 1,

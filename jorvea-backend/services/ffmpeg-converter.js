@@ -12,11 +12,11 @@ const fs = require('fs').promises;
 class FFmpegConverter {
   /**
    * Convert video to HLS with multiple resolutions
-   * Creates 1080p, 720p, and 480p variants for adaptive streaming
+   * Creates 720p and 480p variants for adaptive streaming
+   * (Removed 1080p to reduce memory usage and prevent crashes)
    */
   static async convertToHLS(inputPath, outputDir, videoId, onProgress) {
     const resolutions = [
-      { name: '1080p', width: 1920, height: 1080, bitrate: '5000k', audioBitrate: '192k' },
       { name: '720p', width: 1280, height: 720, bitrate: '2500k', audioBitrate: '128k' },
       { name: '480p', width: 854, height: 480, bitrate: '1200k', audioBitrate: '96k' },
     ];
@@ -26,7 +26,7 @@ class FFmpegConverter {
       const duration = await this.getVideoDuration(inputPath);
       console.log(`📹 Video duration: ${duration.toFixed(2)}s`);
 
-      // Convert each resolution
+      // Convert each resolution sequentially (not parallel to save memory)
       let completedResolutions = 0;
       for (const res of resolutions) {
         console.log(`🎬 Converting ${res.name}...`);
@@ -105,8 +105,8 @@ class FFmpegConverter {
         '-i', inputPath,
         '-vf', `scale=${resolution.width}:${resolution.height}:force_original_aspect_ratio=decrease,pad=${resolution.width}:${resolution.height}:(ow-iw)/2:(oh-ih)/2`,
         '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '23',
+        '-preset', 'veryfast', // Changed from 'fast' to 'veryfast' for less memory
+        '-crf', '28', // Increased from 23 to reduce quality slightly and save memory
         '-maxrate', resolution.bitrate,
         '-bufsize', `${parseInt(resolution.bitrate) * 2}`,
         '-c:a', 'aac',
@@ -119,17 +119,24 @@ class FFmpegConverter {
         '-hls_playlist_type', 'vod',
         '-hls_flags', 'independent_segments',
         '-hls_segment_filename', path.join(outputDir, `${resolution.name}_%03d.ts`),
+        '-threads', '2', // Limit threads to reduce memory usage
+        '-max_muxing_queue_size', '1024', // Prevent memory overflow
         '-f', 'hls',
         path.join(outputDir, `${resolution.name}.m3u8`)
       ];
 
-      const ffmpeg = spawn('ffmpeg', args);
+      const ffmpeg = spawn('ffmpeg', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+      });
       
       let currentTime = 0;
       let lastProgress = 0;
+      let errorOutput = '';
 
       ffmpeg.stderr.on('data', (data) => {
         const output = data.toString();
+        errorOutput += output; // Capture error output
         
         // Parse time from: "time=00:01:23.45"
         const timeMatch = output.match(/time=(\d+):(\d+):(\d+\.\d+)/);
@@ -143,6 +150,7 @@ class FFmpegConverter {
           // Only report significant progress changes (to reduce noise)
           if (progress - lastProgress >= 0.05) {
             onProgress?.(progress);
+            console.log(`📊 Conversion progress: ${Math.round(progress * 100)}%`);
             lastProgress = progress;
           }
         }
@@ -153,12 +161,25 @@ class FFmpegConverter {
           onProgress?.(1.0);
           resolve();
         } else {
-          reject(new Error(`FFmpeg exited with code ${code} for ${resolution.name}`));
+          console.error(`❌ FFmpeg error output for ${resolution.name}:`, errorOutput);
+          reject(new Error(`FFmpeg exited with code ${code} for ${resolution.name}. Last error: ${errorOutput.slice(-500)}`));
         }
       });
 
       ffmpeg.on('error', (err) => {
+        console.error(`❌ FFmpeg spawn error for ${resolution.name}:`, err);
         reject(new Error(`FFmpeg spawn error: ${err.message}`));
+      });
+
+      // Handle process termination
+      process.on('SIGTERM', () => {
+        console.log('⚠️ Received SIGTERM, killing FFmpeg process...');
+        ffmpeg.kill('SIGTERM');
+      });
+
+      process.on('SIGINT', () => {
+        console.log('⚠️ Received SIGINT, killing FFmpeg process...');
+        ffmpeg.kill('SIGINT');
       });
     });
   }

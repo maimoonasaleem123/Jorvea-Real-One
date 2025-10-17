@@ -18,6 +18,9 @@ import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
 import RealTimeLikeSystem from '../services/RealTimeLikeSystem';
+import { StoryList } from '../components/StoryComponents';
+import { InstagramStoryViewer } from '../components/InstagramStoryViewer';
+import FirebaseService, { Story } from '../services/firebaseService';
 
 const { width } = Dimensions.get('window');
 
@@ -31,6 +34,7 @@ interface Post {
   likesCount: number;
   commentsCount: number;
   isLiked?: boolean;
+  isSaved?: boolean;
   user?: {
     username: string;
     profilePicture: string;
@@ -53,19 +57,24 @@ const FastHomeScreen: React.FC = () => {
   const navigation = useNavigation();
 
   const [posts, setPosts] = useState<Post[]>([]);
+  const [stories, setStories] = useState<Story[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [showStoryViewer, setShowStoryViewer] = useState(false);
+  const [storyViewerData, setStoryViewerData] = useState<any>(null);
 
   const lastPostRef = useRef<any>(null);
   const PAGE_SIZE = 10;
   const CACHE_KEY = 'home_posts_cache';
+  const STORIES_CACHE_KEY = 'home_stories_cache';
 
   // Initialize - load from cache first, then fetch fresh
   useEffect(() => {
     if (user?.uid) {
       loadFromCacheFirst();
+      loadStories();
     }
   }, [user?.uid]);
 
@@ -91,7 +100,94 @@ const FastHomeScreen: React.FC = () => {
   };
 
   /**
-   * Load posts with pagination
+   * Load stories - Only from followed users
+   */
+  const loadStories = async () => {
+    try {
+      // Load from cache first
+      const cachedStories = await AsyncStorage.getItem(STORIES_CACHE_KEY);
+      if (cachedStories) {
+        setStories(JSON.parse(cachedStories));
+        console.log('⚡ Loaded stories from cache');
+      }
+
+      // Get user's following list (FIXED: use correct field names)
+      const followingSnapshot = await firestore()
+        .collection('followers')
+        .where('followerId', '==', user?.uid)
+        .get();
+      
+      const followingIds = followingSnapshot.docs.map(doc => doc.data().followedUserId);
+      
+      // Include user's own stories
+      followingIds.push(user?.uid);
+      
+      console.log(`👥 Loading stories from ${followingIds.length} users`);
+
+      // Fetch stories from followed users only
+      const allStories = await FirebaseService.getStories(user?.uid);
+      
+      // Filter to only show stories from followed users + own stories
+      const filteredStories = allStories.filter(story => 
+        followingIds.includes(story.userId || story.user?.uid)
+      );
+      
+      setStories(filteredStories);
+      
+      // Update cache
+      await AsyncStorage.setItem(STORIES_CACHE_KEY, JSON.stringify(filteredStories));
+      console.log(`✅ Loaded ${filteredStories.length} stories from followed users`);
+    } catch (error) {
+      console.error('Error loading stories:', error);
+    }
+  };
+
+  /**
+   * Handle story view
+   */
+  const handleViewStory = (story: Story, groupedStories?: Story[]) => {
+    try {
+      // Prepare story viewer data
+      const userStories: { [userId: string]: Story[] } = {};
+      
+      // Group all stories by user
+      stories.forEach(s => {
+        const userId = s.user?.uid || s.id;
+        if (!userStories[userId]) {
+          userStories[userId] = [];
+        }
+        userStories[userId].push(s);
+      });
+
+      // Find the user and story index
+      const userId = story.user?.uid || story.id;
+      const userStoriesList = userStories[userId] || [story];
+      const storyIndex = userStoriesList.findIndex(s => s.id === story.id);
+
+      setStoryViewerData({
+        stories: userStoriesList,
+        userStories,
+        initialUserIndex: Object.keys(userStories).indexOf(userId),
+        initialStoryIndex: storyIndex >= 0 ? storyIndex : 0,
+      });
+      
+      setShowStoryViewer(true);
+    } catch (error) {
+      console.error('Error opening story viewer:', error);
+      Alert.alert('Error', 'Failed to open story');
+    }
+  };
+
+  /**
+   * Handle create story
+   */
+  const handleCreateStory = () => {
+    (navigation as any).navigate('ComprehensiveStoryCreation');
+  };
+
+  /**
+   * Load posts with pagination - Instagram-style feed
+   * Priority: Latest posts from followed users first, then discover posts
    */
   const loadPosts = async (refresh: boolean = false) => {
     if (!user?.uid) return;
@@ -106,29 +202,66 @@ const FastHomeScreen: React.FC = () => {
         setLoadingMore(true);
       }
 
-      let query = firestore()
+      // Get user's following list (FIXED: use correct field names)
+      const followingSnapshot = await firestore()
+        .collection('followers')
+        .where('followerId', '==', user.uid)
+        .get();
+      
+      const followingIds = followingSnapshot.docs.map(doc => doc.data().followedUserId);
+      console.log(`👥 Following ${followingIds.length} users`);
+
+      // Fetch posts from followed users first (if any)
+      let followedPosts: any[] = [];
+      if (followingIds.length > 0) {
+        // Firebase 'in' query supports max 10 items, so chunk if needed
+        const chunks = [];
+        for (let i = 0; i < followingIds.length; i += 10) {
+          chunks.push(followingIds.slice(i, i + 10));
+        }
+
+        for (const chunk of chunks) {
+          const followedQuery = await firestore()
+            .collection('posts')
+            .where('userId', 'in', chunk)
+            .orderBy('createdAt', 'desc')
+            .limit(PAGE_SIZE)
+            .get();
+          
+          followedPosts = [...followedPosts, ...followedQuery.docs];
+        }
+      }
+
+      // Fetch discover posts (not from followed users)
+      let discoverQuery = firestore()
         .collection('posts')
         .orderBy('createdAt', 'desc')
         .limit(PAGE_SIZE);
 
-      // Pagination
+      // Pagination for discover posts
       if (!refresh && lastPostRef.current) {
-        query = query.startAfter(lastPostRef.current);
+        discoverQuery = discoverQuery.startAfter(lastPostRef.current);
       }
 
-      const snapshot = await query.get();
+      const discoverSnapshot = await discoverQuery.get();
+      const discoverPosts = discoverSnapshot.docs.filter(
+        doc => !followingIds.includes(doc.data().userId)
+      );
 
-      if (snapshot.empty) {
+      // Combine: followed posts first, then discover
+      const allDocs = [...followedPosts, ...discoverPosts].slice(0, PAGE_SIZE);
+
+      if (allDocs.length === 0) {
         setHasMore(false);
         return;
       }
 
       // Save last document for pagination
-      lastPostRef.current = snapshot.docs[snapshot.docs.length - 1];
+      lastPostRef.current = allDocs[allDocs.length - 1];
 
-      // Fetch user data and like status for each post
+      // Fetch user data, like status, and save status for each post
       const postsData = await Promise.all(
-        snapshot.docs.map(async (doc) => {
+        allDocs.map(async (doc) => {
           const data = doc.data();
           
           // Get user data
@@ -147,21 +280,37 @@ const FastHomeScreen: React.FC = () => {
             .doc(user.uid)
             .get();
 
+          // Check if current user saved this post
+          const savedDoc = await firestore()
+            .collection('savedPosts')
+            .doc(`${user.uid}_${doc.id}`)
+            .get();
+
+          // Handle different field names (imageUrl, imageUrls, mediaUrls, etc.)
+          const getImageUrl = () => {
+            if (data.imageUrl) return data.imageUrl;
+            if (data.imageUrls && data.imageUrls[0]) return data.imageUrls[0];
+            if (data.mediaUrls && data.mediaUrls[0]) return data.mediaUrls[0];
+            if (data.mediaUrl) return data.mediaUrl;
+            return null;
+          };
+
           const post: Post = {
             id: doc.id,
             userId: data.userId || '',
-            caption: data.caption || '',
-            imageUrl: data.imageUrl,
+            caption: data.caption || data.text || '',
+            imageUrl: getImageUrl(),
             videoUrl: data.videoUrl,
-            mediaUrls: data.mediaUrls,
+            mediaUrls: data.mediaUrls || data.imageUrls,
             likesCount: data.likesCount || 0,
             commentsCount: data.commentsCount || 0,
             createdAt: data.createdAt,
             isLiked: likeDoc.exists(),
+            isSaved: savedDoc.exists(),
             user: userData ? {
-              username: userData.username || 'user',
-              profilePicture: userData.profilePicture || '',
-              displayName: userData.displayName,
+              username: userData.username || userData.displayName || 'user',
+              profilePicture: userData.profilePicture || userData.photoURL || '',
+              displayName: userData.displayName || userData.username,
             } : undefined,
             timeAgo: getTimeAgo(data.createdAt),
           };
@@ -179,8 +328,8 @@ const FastHomeScreen: React.FC = () => {
         setPosts((prev) => [...prev, ...postsData]);
       }
 
-      setHasMore(snapshot.docs.length === PAGE_SIZE);
-      console.log(`✅ Loaded ${postsData.length} posts`);
+      setHasMore(allDocs.length === PAGE_SIZE);
+      console.log(`✅ Loaded ${postsData.length} posts (${followedPosts.length} from followed users)`);
     } catch (error) {
       console.error('Error loading posts:', error);
       Alert.alert('Error', 'Failed to load posts');
@@ -273,6 +422,53 @@ const FastHomeScreen: React.FC = () => {
   };
 
   /**
+   * Handle save/unsave post
+   */
+  const handleSave = async (postId: string) => {
+    if (!user?.uid) return;
+
+    try {
+      // Find post
+      const postIndex = posts.findIndex((p) => p.id === postId);
+      if (postIndex === -1) return;
+
+      const post = posts[postIndex];
+      const wasSaved = post.isSaved || false;
+
+      // Optimistic UI update
+      const updatedPosts = [...posts];
+      updatedPosts[postIndex] = {
+        ...post,
+        isSaved: !wasSaved,
+      };
+      setPosts(updatedPosts);
+
+      // Update Firebase
+      const savedPostRef = firestore()
+        .collection('savedPosts')
+        .doc(`${user.uid}_${postId}`);
+
+      if (wasSaved) {
+        // Unsave
+        await savedPostRef.delete();
+        console.log(`✅ Unsaved post ${postId}`);
+      } else {
+        // Save
+        await savedPostRef.set({
+          userId: user.uid,
+          postId: postId,
+          savedAt: firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`✅ Saved post ${postId}`);
+      }
+    } catch (error) {
+      console.error('Error saving post:', error);
+      // Revert optimistic update
+      await loadPosts(true);
+    }
+  };
+
+  /**
    * Navigate to profile
    */
   const handleProfile = (userId: string) => {
@@ -309,36 +505,57 @@ const FastHomeScreen: React.FC = () => {
       </View>
 
       {/* Media */}
-      {item.imageUrl && (
+      {item.imageUrl ? (
         <Image
           source={{ uri: item.imageUrl }}
           style={styles.postImage}
           resizeMode="cover"
+          onError={(error) => {
+            console.log('❌ Image load error:', item.imageUrl, error);
+          }}
         />
+      ) : (
+        <View style={[styles.postImage, styles.noImagePlaceholder]}>
+          <Icon name="image-outline" size={64} color="#ccc" />
+          <Text style={styles.noImageText}>No image</Text>
+        </View>
       )}
 
       {/* Actions */}
       <View style={styles.actions}>
+        <View style={styles.leftActions}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handleLike(item.id)}
+          >
+            <Icon
+              name={item.isLiked ? 'heart' : 'heart-outline'}
+              size={28}
+              color={item.isLiked ? '#ff3b30' : '#000'}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handleComments(item.id)}
+          >
+            <Icon name="chatbubble-outline" size={26} color="#000" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.actionButton}>
+            <Icon name="paper-plane-outline" size={26} color="#000" />
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => handleLike(item.id)}
+          onPress={() => handleSave(item.id)}
         >
           <Icon
-            name={item.isLiked ? 'heart' : 'heart-outline'}
-            size={28}
-            color={item.isLiked ? '#ff3b30' : '#000'}
+            name={item.isSaved ? 'bookmark' : 'bookmark-outline'}
+            size={26}
+            color="#000"
           />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => handleComments(item.id)}
-        >
-          <Icon name="chatbubble-outline" size={26} color="#000" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionButton}>
-          <Icon name="paper-plane-outline" size={26} color="#000" />
         </TouchableOpacity>
       </View>
 
@@ -434,10 +651,29 @@ const FastHomeScreen: React.FC = () => {
         data={posts}
         renderItem={renderPost}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={
+          stories.length > 0 ? (
+            <View style={styles.storiesContainer}>
+              <StoryList
+                stories={stories}
+                currentUserId={user?.uid}
+                onCreateStory={handleCreateStory}
+                onViewStory={handleViewStory}
+                showCreateButton={true}
+              />
+            </View>
+          ) : null
+        }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={() => {
+              handleRefresh();
+              loadStories(); // Also refresh stories
+            }} 
+          />
         }
         ListEmptyComponent={!loading ? renderEmpty : null}
         ListFooterComponent={renderFooter}
@@ -446,6 +682,23 @@ const FastHomeScreen: React.FC = () => {
         maxToRenderPerBatch={5}
         windowSize={10}
       />
+
+      {/* Story Viewer Modal */}
+      {showStoryViewer && storyViewerData && (
+        <InstagramStoryViewer
+          visible={showStoryViewer}
+          stories={storyViewerData.stories}
+          userStories={storyViewerData.userStories}
+          initialUserIndex={storyViewerData.initialUserIndex}
+          initialStoryIndex={storyViewerData.initialStoryIndex}
+          onClose={() => {
+            setShowStoryViewer(false);
+            setStoryViewerData(null);
+            loadStories(); // Refresh stories after viewing
+          }}
+          currentUserId={user?.uid}
+        />
+      )}
     </View>
   );
 };
@@ -526,10 +779,25 @@ const styles = StyleSheet.create({
     height: width,
     backgroundColor: '#f0f0f0',
   },
+  noImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  noImageText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#999',
+  },
   actions: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  leftActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   actionButton: {
     marginRight: 16,
@@ -582,6 +850,12 @@ const styles = StyleSheet.create({
   footerLoader: {
     paddingVertical: 20,
     alignItems: 'center',
+  },
+  storiesContainer: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#dbdbdb',
+    paddingVertical: 8,
   },
 });
 

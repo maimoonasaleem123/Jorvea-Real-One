@@ -25,9 +25,11 @@ require('dotenv').config();
 const FFmpegConverter = require('./services/ffmpeg-converter');
 const UploadService = require('./services/upload-service');
 const NotificationService = require('./services/notification-service');
+const { initializeScheduler } = require('./story-cleanup-scheduler');
 
 // Import analytics routes
 const reelsAnalyticsRouter = require('./routes/reels-analytics');
+const storyCleanupRouter = require('./routes/story-cleanup');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,6 +41,9 @@ app.use(express.urlencoded({ extended: true }));
 
 // Mount analytics routes
 app.use('/api/reels', reelsAnalyticsRouter);
+
+// Mount story cleanup routes
+app.use('/api/stories', storyCleanupRouter);
 
 // Configure multer for file uploads
 const upload = multer({
@@ -256,7 +261,17 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('=====================================\n');
   console.log('✅ Ready to process videos with FFmpeg!');
   console.log('⚡ HLS adaptive streaming enabled');
-  console.log('📤 DigitalOcean Spaces configured\n');
+  console.log('📤 DigitalOcean Spaces configured');
+  
+  // Initialize story cleanup scheduler
+  try {
+    initializeScheduler();
+    console.log('🧹 Story cleanup scheduler started (runs every hour)');
+  } catch (error) {
+    console.error('⚠️ Failed to start story cleanup scheduler:', error.message);
+  }
+  
+  console.log('\n');
 });
 
 // Graceful shutdown

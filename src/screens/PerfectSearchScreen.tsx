@@ -335,9 +335,30 @@ const PerfectSearchScreen: React.FC = () => {
 
   const renderGridItem = ({ item, index }: { item: Post | Reel; index: number }) => {
     const isReel = 'videoUrl' in item;
-    const thumbnailUri = isReel 
-      ? (item as Reel).thumbnailUrl || (item as Reel).videoUrl
-      : (item as Post).mediaUrls?.[0];
+    
+    // Get thumbnail with better fallback logic
+    const getThumbnailUri = () => {
+      if (isReel) {
+        const reel = item as any;
+        // Check all possible thumbnail field names
+        if (reel.thumbnailUrl) return reel.thumbnailUrl;
+        if (reel.thumbnail) return reel.thumbnail;
+        if (reel.thumbnailURL) return reel.thumbnailURL;
+        if (reel.coverUrl) return reel.coverUrl;
+        if (reel.cover) return reel.cover;
+        // Fallback to video URL
+        if (reel.videoUrl) return reel.videoUrl;
+      } else {
+        const post = item as Post;
+        // For posts, check media URLs
+        if (post.mediaUrls && post.mediaUrls.length > 0) return post.mediaUrls[0];
+        if ((post as any).imageUrl) return (post as any).imageUrl;
+        if ((post as any).imageUrls && (post as any).imageUrls.length > 0) return (post as any).imageUrls[0];
+      }
+      return null;
+    };
+    
+    const thumbnailUri = getThumbnailUri();
 
     return (
       <TouchableOpacity 
@@ -351,11 +372,17 @@ const PerfectSearchScreen: React.FC = () => {
         }}
         activeOpacity={0.9}
       >
-        <Image
-          source={{ uri: thumbnailUri || 'https://via.placeholder.com/150' }}
-          style={styles.gridImage}
-          resizeMode="cover"
-        />
+        {thumbnailUri ? (
+          <Image
+            source={{ uri: thumbnailUri }}
+            style={styles.gridImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.gridImage, styles.placeholderContainer]}>
+            <Icon name={isReel ? "videocam" : "image"} size={32} color="#999" />
+          </View>
+        )}
         
         {/* Overlay Indicators */}
         {isReel ? (
@@ -850,6 +877,11 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     backgroundColor: '#e0e0e0',
+  },
+  placeholderContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
   },
   reelOverlay: {
     position: 'absolute',
