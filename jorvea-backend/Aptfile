@@ -1,1 +1,8 @@
 ffmpeg
+libvpx7
+libx264-dev
+libx265-dev
+libmp3lame0
+libopus0
+libvorbis0a
+libtheora0
