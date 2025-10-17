@@ -13,24 +13,24 @@ RUN apk add --no-cache \
 # Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package files from jorvea-backend directory
+COPY jorvea-backend/package*.json ./
 
 # Install dependencies
 RUN npm install --production
 
-# Copy application code
-COPY . .
+# Copy application code from jorvea-backend directory
+COPY jorvea-backend/ .
 
 # Create required directories
 RUN mkdir -p uploads output temp
 
-# Expose port
-EXPOSE 3000
+# Expose port (DigitalOcean uses 8080)
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))"
+  CMD node -e "require('http').get('http://localhost:8080/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))"
 
 # Start server
 CMD ["node", "server.js"]
