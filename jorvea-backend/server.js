@@ -110,13 +110,19 @@ app.post('/convert-hls', upload.single('video'), async (req, res) => {
     console.log(`📁 Video size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
     console.log('================================\n');
 
-    // Respond immediately - processing happens in background
+    // Calculate estimated HLS URL immediately (before processing)
+    const estimatedHlsUrl = `${process.env.DO_SPACES_CDN_URL}/reels/hls/${jobId}/master.m3u8`;
+    const estimatedThumbnailUrl = `${process.env.DO_SPACES_CDN_URL}/reels/hls/${jobId}/thumbnail.jpg`;
+
+    // Respond immediately with estimated URLs
     res.json({
       success: true,
       jobId,
       message: 'Video processing started in background',
       estimatedTime: '2-5 minutes',
       status: 'processing',
+      hlsUrl: estimatedHlsUrl,  // ✅ Return the URL that will be created
+      thumbnailUrl: estimatedThumbnailUrl,
     });
 
     // Process in background (don't await)
