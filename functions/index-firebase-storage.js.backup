@@ -1,0 +1,377 @@
+/**
+ * Firebase Functions - Automatic HLS Video Conversion
+ * Converts ANY video format (MP4, MOV, AVI, etc.) to HLS (.m3u8) with chunking
+ * 
+ * SETUP:
+ * 1. cd functions
+ * 2. npm install @google-cloud/storage fluent-ffmpeg @ffmpeg-installer/ffmpeg
+ * 3. firebase deploy --only functions
+ */
+
+const functions = require('firebase-functions');
+const admin = require('firebase-admin');
+const { Storage } = require('@google-cloud/storage');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const ffmpeg = require('fluent-ffmpeg');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
+
+// Set FFmpeg path
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+const storage = new Storage();
+
+/**
+ * Automatically triggered when a video is uploaded to 'reels/' folder
+ * Converts ANY video format to HLS with multi-resolution support
+ */
+exports.convertVideoToHLS = functions
+  .runWith({
+    timeoutSeconds: 540, // 9 minutes max
+    memory: '2GB',       // Need memory for video processing
+  })
+  .storage
+  .object()
+  .onFinalize(async (object) => {
+    const filePath = object.name; // e.g., reels/123456_video.mp4
+    const contentType = object.contentType;
+
+    // Only process videos in 'reels/' folder
+    if (!filePath.startsWith('reels/')) {
+      console.log('❌ Not a reel video, skipping:', filePath);
+      return null;
+    }
+
+    // Skip if already HLS
+    if (filePath.includes('/hls/') || filePath.endsWith('.m3u8') || filePath.endsWith('.ts')) {
+      console.log('⏭️ Already HLS format, skipping:', filePath);
+      return null;
+    }
+
+    // Only process video files
+    if (!contentType || !contentType.startsWith('video/')) {
+      console.log('❌ Not a video file, skipping:', filePath);
+      return null;
+    }
+
+    console.log('🎬 Starting HLS conversion for:', filePath);
+    console.log('📦 Content Type:', contentType);
+
+    const bucket = storage.bucket(object.bucket);
+    const fileName = path.basename(filePath);
+    const fileNameWithoutExt = path.parse(fileName).name;
+    const videoId = fileNameWithoutExt.split('_')[0] || Date.now().toString();
+
+    // Temporary paths
+    const tempDir = os.tmpdir();
+    const tempInputPath = path.join(tempDir, `input_${videoId}${path.extname(fileName)}`);
+    const tempOutputDir = path.join(tempDir, `hls_${videoId}`);
+
+    try {
+      // Step 1: Download video from Firebase Storage
+      console.log('📥 Downloading video...');
+      await bucket.file(filePath).download({ destination: tempInputPath });
+      console.log('✅ Video downloaded:', tempInputPath);
+
+      // Create output directory
+      fs.mkdirSync(tempOutputDir, { recursive: true });
+
+      // Step 2: Get video metadata
+      const metadata = await getVideoMetadata(tempInputPath);
+      console.log('📊 Video metadata:', metadata);
+
+      // Step 3: Convert to HLS with multiple resolutions
+      console.log('🔄 Converting to HLS with adaptive bitrate...');
+      await convertToHLS(tempInputPath, tempOutputDir, metadata);
+      console.log('✅ HLS conversion complete!');
+
+      // Step 4: Generate thumbnail
+      console.log('📸 Generating thumbnail...');
+      const thumbnailPath = await generateThumbnail(tempInputPath, tempOutputDir, videoId);
+      console.log('✅ Thumbnail generated:', thumbnailPath);
+
+      // Step 5: Upload all HLS files to Firebase Storage
+      console.log('⬆️ Uploading HLS files...');
+      const hlsBasePath = `reels/hls/${videoId}`;
+      const files = fs.readdirSync(tempOutputDir);
+      
+      const uploadPromises = files.map(async (file) => {
+        const localPath = path.join(tempOutputDir, file);
+        const remotePath = `${hlsBasePath}/${file}`;
+        
+        let contentType = 'application/octet-stream';
+        if (file.endsWith('.m3u8')) {
+          contentType = 'application/vnd.apple.mpegurl';
+        } else if (file.endsWith('.ts')) {
+          contentType = 'video/mp2t';
+        } else if (file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+          contentType = 'image/jpeg';
+        }
+
+        await bucket.upload(localPath, {
+          destination: remotePath,
+          metadata: {
+            contentType: contentType,
+            cacheControl: 'public, max-age=31536000', // Cache for 1 year
+          },
+          public: true, // Make publicly accessible
+        });
+
+        console.log(`✅ Uploaded: ${file}`);
+      });
+
+      await Promise.all(uploadPromises);
+      console.log('✅ All HLS files uploaded!');
+
+      // Step 6: Get public URLs
+      const masterPlaylistUrl = `https://storage.googleapis.com/${object.bucket}/${hlsBasePath}/master.m3u8`;
+      const thumbnailUrl = thumbnailPath 
+        ? `https://storage.googleapis.com/${object.bucket}/${hlsBasePath}/thumbnail.jpg`
+        : '';
+
+      console.log('📺 HLS Master Playlist:', masterPlaylistUrl);
+      console.log('🖼️ Thumbnail:', thumbnailUrl);
+
+      // Step 7: Update Firestore with HLS URLs
+      try {
+        const db = admin.firestore();
+        
+        // Find the reel document by videoUrl
+        const reelsSnapshot = await db.collection('reels')
+          .where('videoUrl', '==', `https://storage.googleapis.com/${object.bucket}/${filePath}`)
+          .limit(1)
+          .get();
+
+        if (!reelsSnapshot.empty) {
+          const reelDoc = reelsSnapshot.docs[0];
+          await reelDoc.ref.update({
+            videoUrl: masterPlaylistUrl,      // Update to HLS URL
+            hlsUrl: masterPlaylistUrl,        // Backup field
+            thumbnailUrl: thumbnailUrl || reelDoc.data().thumbnailUrl,
+            isHLS: true,
+            resolutions: metadata.resolutions,
+            duration: metadata.duration,
+            convertedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log('✅ Firestore updated with HLS URLs');
+        } else {
+          console.log('⚠️ Reel document not found in Firestore (might be created later)');
+        }
+      } catch (firestoreError) {
+        console.error('❌ Firestore update error:', firestoreError);
+        // Don't fail the function, HLS files are already uploaded
+      }
+
+      // Step 8: Cleanup
+      console.log('🧹 Cleaning up temporary files...');
+      fs.unlinkSync(tempInputPath);
+      fs.rmSync(tempOutputDir, { recursive: true, force: true });
+      console.log('✅ Cleanup complete!');
+
+      console.log('🎉 HLS Conversion Complete!');
+      console.log('📺 Users will now get chunked streaming with adaptive bitrate!');
+
+      return {
+        success: true,
+        hlsUrl: masterPlaylistUrl,
+        thumbnailUrl: thumbnailUrl,
+        videoId: videoId,
+      };
+
+    } catch (error) {
+      console.error('❌ HLS Conversion Error:', error);
+      
+      // Cleanup on error
+      try {
+        if (fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
+        if (fs.existsSync(tempOutputDir)) fs.rmSync(tempOutputDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        console.error('❌ Cleanup error:', cleanupError);
+      }
+
+      // Update Firestore with error status
+      try {
+        const db = admin.firestore();
+        const reelsSnapshot = await db.collection('reels')
+          .where('videoUrl', '==', `https://storage.googleapis.com/${object.bucket}/${filePath}`)
+          .limit(1)
+          .get();
+
+        if (!reelsSnapshot.empty) {
+          await reelsSnapshot.docs[0].ref.update({
+            conversionError: error.message,
+            conversionStatus: 'failed',
+          });
+        }
+      } catch (firestoreError) {
+        console.error('❌ Failed to update error status in Firestore:', firestoreError);
+      }
+
+      throw error;
+    }
+  });
+
+/**
+ * Get video metadata (duration, resolution, etc.)
+ */
+function getVideoMetadata(inputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(inputPath, (err, metadata) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+      const duration = metadata.format.duration || 0;
+      const width = videoStream?.width || 1920;
+      const height = videoStream?.height || 1080;
+
+      // Determine available resolutions based on input
+      const resolutions = [];
+      if (height >= 1080) resolutions.push('1080p', '720p', '480p');
+      else if (height >= 720) resolutions.push('720p', '480p');
+      else if (height >= 480) resolutions.push('480p');
+      else resolutions.push('360p');
+
+      resolve({
+        duration: Math.round(duration),
+        width,
+        height,
+        resolutions,
+      });
+    });
+  });
+}
+
+/**
+ * Convert video to HLS with multiple resolutions
+ * Creates adaptive bitrate streaming
+ */
+function convertToHLS(inputPath, outputDir, metadata) {
+  return new Promise((resolve, reject) => {
+    const { width, height, resolutions } = metadata;
+
+    // Determine bitrates based on resolution
+    const variantPlaylists = [];
+    
+    if (resolutions.includes('1080p')) {
+      variantPlaylists.push({
+        resolution: '1920x1080',
+        bitrate: '5000k',
+        name: 'high',
+      });
+    }
+    
+    if (resolutions.includes('720p')) {
+      variantPlaylists.push({
+        resolution: '1280x720',
+        bitrate: '2800k',
+        name: 'medium',
+      });
+    }
+    
+    if (resolutions.includes('480p') || resolutions.includes('360p')) {
+      variantPlaylists.push({
+        resolution: '854x480',
+        bitrate: '1400k',
+        name: 'low',
+      });
+    }
+
+    // Generate HLS streams for each resolution
+    const command = ffmpeg(inputPath);
+
+    variantPlaylists.forEach((variant, index) => {
+      command
+        .output(`${outputDir}/${variant.name}.m3u8`)
+        .outputOptions([
+          `-c:v libx264`,              // H.264 codec
+          `-c:a aac`,                   // AAC audio
+          `-b:v ${variant.bitrate}`,    // Video bitrate
+          `-b:a 128k`,                  // Audio bitrate
+          `-s ${variant.resolution}`,   // Resolution
+          `-profile:v main`,            // H.264 profile
+          `-preset fast`,               // Encoding speed
+          `-sc_threshold 0`,            // Disable scene detection
+          `-g 48`,                      // Keyframe interval
+          `-keyint_min 48`,
+          `-hls_time 6`,                // 6-second segments
+          `-hls_playlist_type vod`,     // Video on demand
+          `-hls_segment_filename ${outputDir}/${variant.name}_%03d.ts`,
+        ]);
+    });
+
+    command
+      .on('start', (commandLine) => {
+        console.log('🎬 FFmpeg command:', commandLine);
+      })
+      .on('progress', (progress) => {
+        if (progress.percent) {
+          console.log(`⏳ Converting: ${Math.round(progress.percent)}%`);
+        }
+      })
+      .on('end', () => {
+        console.log('✅ FFmpeg conversion complete');
+        
+        // Generate master playlist
+        generateMasterPlaylist(outputDir, variantPlaylists);
+        
+        resolve();
+      })
+      .on('error', (err) => {
+        console.error('❌ FFmpeg error:', err);
+        reject(err);
+      })
+      .run();
+  });
+}
+
+/**
+ * Generate master playlist for adaptive bitrate streaming
+ */
+function generateMasterPlaylist(outputDir, variants) {
+  let masterPlaylist = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
+
+  variants.forEach((variant) => {
+    const bandwidth = parseInt(variant.bitrate) * 1000; // Convert to bps
+    const [width, height] = variant.resolution.split('x');
+    
+    masterPlaylist += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${width}x${height}\n`;
+    masterPlaylist += `${variant.name}.m3u8\n\n`;
+  });
+
+  fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
+  console.log('✅ Master playlist generated');
+}
+
+/**
+ * Generate video thumbnail
+ */
+function generateThumbnail(inputPath, outputDir, videoId) {
+  return new Promise((resolve, reject) => {
+    const thumbnailPath = path.join(outputDir, 'thumbnail.jpg');
+
+    ffmpeg(inputPath)
+      .screenshots({
+        timestamps: ['10%'], // Capture at 10% of video duration
+        filename: 'thumbnail.jpg',
+        folder: outputDir,
+        size: '1280x720',
+      })
+      .on('end', () => {
+        console.log('✅ Thumbnail generated');
+        resolve(thumbnailPath);
+      })
+      .on('error', (err) => {
+        console.error('❌ Thumbnail error:', err);
+        resolve(null); // Don't fail if thumbnail fails
+      });
+  });
+}

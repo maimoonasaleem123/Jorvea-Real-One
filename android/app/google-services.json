@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "236350952922",
+    "project_id": "jorvea-9f876",
+    "storage_bucket": "jorvea-9f876.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:236350952922:android:883204bca91666ab149ce3",
+        "android_client_info": {
+          "package_name": "com.jorvea"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "236350952922-n4f16m00dshl106usspoiker6ujfbg58.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBCJPm-598c0Yxct9m94uX5IlJKVOl30TA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "236350952922-n4f16m00dshl106usspoiker6ujfbg58.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,57 @@
+/**
+ * Updated CreateReelScreen with Background Processing
+ * User can immediately return to app after selecting video!
+ */
+
+// Add this import at the top
+import BackgroundVideoProcessor from '../services/BackgroundVideoProcessor';
+
+// Replace the createReel/handlePost function with this:
+
+const handlePostWithBackground = async () => {
+  if (!selectedVideo || !user) {
+    Alert.alert('Error', 'Please select a video first');
+    return;
+  }
+
+  try {
+    // Add to background queue
+    const jobId = await BackgroundVideoProcessor
+      .getInstance()
+      .addToQueue(selectedVideo.uri, user.uid, caption);
+
+    // User can immediately continue using app!
+    Alert.alert(
+      '🎉 Video Added to Queue!',
+      'Your reel is being processed in the background. You can continue using the app and will be notified when it\'s done!',
+      [
+        {
+          text: 'View Queue',
+          onPress: () => navigation.navigate('UploadQueue'),
+        },
+        {
+          text: 'Continue',
+          onPress: () => navigation.goBack(),
+          style: 'default',
+        },
+      ]
+    );
+
+    // Reset form
+    setSelectedVideo(null);
+    setCaption('');
+    setShowCaptionModal(false);
+
+  } catch (error) {
+    console.error('❌ Failed to add to queue:', error);
+    Alert.alert('Error', 'Failed to add video to upload queue');
+  }
+};
+
+// In your render, replace the Post button action:
+<TouchableOpacity 
+  style={styles.postButton} 
+  onPress={handlePostWithBackground}
+>
+  <Text style={styles.postButtonText}>Post</Text>
+</TouchableOpacity>
