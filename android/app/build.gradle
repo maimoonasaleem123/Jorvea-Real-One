@@ -130,6 +130,12 @@ dependencies {
     
     // Add C++ standard library
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.21'
+    
+    // 🚀 ExoPlayer with HLS support for react-native-video
+    implementation 'androidx.media3:media3-exoplayer:1.2.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.2.1'
+    implementation 'androidx.media3:media3-ui:1.2.1'
+    implementation 'androidx.media3:media3-common:1.2.1'
 
     // Force all dependencies to use AndroidX instead of old support libraries
     configurations.all {

@@ -299,11 +299,10 @@ class BackgroundVideoProcessor {
             const response = JSON.parse(xhr.responseText);
             console.log('✅ Backend response:', response);
             
-            // For now, return temporary URLs
-            // Backend will update these when conversion is done
+            // ✅ Use the actual HLS URLs returned by backend
             resolve({
-              hlsUrl: `${DO_CONFIG.cdnUrl}/reels/${videoId}.mp4`, // Temp: original video
-              thumbnailUrl: `${DO_CONFIG.cdnUrl}/reels/${videoId}_thumb.jpg`,
+              hlsUrl: response.hlsUrl || response.url || `${DO_CONFIG.cdnUrl}/reels/hls/${videoId}/master.m3u8`,
+              thumbnailUrl: response.thumbnailUrl || `${DO_CONFIG.cdnUrl}/reels/hls/${videoId}/thumbnail.jpg`,
             });
           } else {
             reject(new Error(`Upload failed with status: ${xhr.status}`));

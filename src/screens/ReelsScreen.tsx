@@ -42,7 +42,10 @@ import firestore from '@react-native-firebase/firestore';
 import PerfectChunkedVideoPlayer from '../components/PerfectChunkedVideoPlayer';
 import InstagramStyleVideoPlayer from '../components/InstagramStyleVideoPlayer';
 import FreeVideoPlayer from '../components/FreeVideoPlayer';
+import InstagramVideoPlayer from '../components/InstagramVideoPlayer';
 import InstagramReelPreloader from '../services/InstagramReelPreloader';
+import FastReelPreloader from '../services/FastReelPreloader';
+
 import PerfectChunkedStreamingEngine from '../services/PerfectChunkedStreamingEngine';
 import PerfectInstantThumbnailSystem from '../services/PerfectInstantThumbnailSystem';
 import AdvancedSegmentedVideoFetcher from '../services/AdvancedSegmentedVideoFetcher';
@@ -491,8 +494,8 @@ const OptimizedReelItem: React.FC<ReelItemProps> = React.memo(({
         }}
         style={styles.videoContainer}>
         <View style={styles.videoContainer}>
-          {/* FREE HLS-Compatible Video Player with Chunking Support */}
-          <FreeVideoPlayer
+          {/* 🚀 INSTAGRAM-STYLE VIDEO PLAYER - NO OVERLAYS, INSTANT PLAYBACK */}
+          <InstagramVideoPlayer
             videoUrl={reel.videoUrl}
             thumbnailUrl={reel.thumbnailUrl || ''}
             paused={!isPlaying}
@@ -502,12 +505,11 @@ const OptimizedReelItem: React.FC<ReelItemProps> = React.memo(({
             onLoad={handleVideoLoad}
             onProgress={handleVideoProgress}
             onBuffer={(buffering) => {
-              // Handle buffering state if needed
+              // Silent buffering - no UI shown
             }}
             onError={(error) => {
               console.error('❌ Video error:', error);
             }}
-            showControls={false}
             style={styles.video}
           />
 
@@ -1919,6 +1921,9 @@ const ReelsScreen: React.FC = () => {
       const newIndex = viewableItems[0].index || 0;
       if (newIndex !== currentIndex) {
         setCurrentIndex(newIndex);
+        
+        // 🚀 INSTAGRAM-STYLE: Preload next 2-3 reels for instant playback
+        FastReelPreloader.preloadNextReels(reels, newIndex, 3);
         
         // Smart background loading - load next reel when approaching end
         const remainingReels = reels.length - newIndex;
