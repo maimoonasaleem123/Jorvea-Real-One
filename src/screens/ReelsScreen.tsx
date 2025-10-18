@@ -923,7 +923,15 @@ const ReelsScreen: React.FC = () => {
   const route = useRoute();
   
   // Get navigation parameters for perfect reel opening from profile/search
-  const { initialReelId, focusedReelId, fromProfile, fromSearch, reels: passedReels, initialIndex } = (route.params as any) || {};
+  const { 
+    initialReelId, 
+    focusedReelId, 
+    fromProfile, 
+    fromSearch, 
+    reels: passedReels, 
+    passedReel, // Single reel passed from search
+    initialIndex 
+  } = (route.params as any) || {};
 
   // Priority order: focusedReelId (from shared reel) > initialReelId > normal flow
   const targetReelId = focusedReelId || initialReelId;
@@ -1329,6 +1337,34 @@ const ReelsScreen: React.FC = () => {
     if (!user?.uid) return;
 
     try {
+      // 🎯 INSTAGRAM-PERFECT: If a single reel is passed from search, make it the FIRST reel
+      if (passedReel && fromSearch) {
+        console.log('🎬 Instagram-perfect: Making clicked reel the FIRST reel (index 0)');
+        
+        // ✅ INSTANT DISPLAY: Show the clicked reel immediately at index 0
+        setReels([passedReel]);
+        setCurrentIndex(0);
+        setLoading(false);
+        
+        // 🚀 INSTANT: Prepare the clicked video immediately
+        if (passedReel.videoUrl && advancedVideoFetcher) {
+          try {
+            await advancedVideoFetcher.prepareVideo(passedReel.videoUrl, passedReel.id);
+            console.log('[ReelsScreen] Clicked reel video prepared instantly:', passedReel.id);
+          } catch (error) {
+            console.warn('[ReelsScreen] Clicked reel video preparation failed:', passedReel.id, error);
+          }
+        }
+        
+        // 🚀 BACKGROUND: Load more reels after showing the clicked one
+        setTimeout(() => {
+          console.log('🔄 Background loading more reels after clicked reel...');
+          backgroundLoadReels();
+        }, 500);
+        
+        return;
+      }
+      
       // If reels are passed from search/profile, use them instead of loading from Firebase
       if (passedReels && passedReels.length > 0) {
         console.log('🎬 Instagram-perfect: Using passed reels from search/profile...', passedReels.length);
@@ -1400,7 +1436,7 @@ const ReelsScreen: React.FC = () => {
       console.error('❌ Error loading initial reel:', err);
       setError('Failed to load reel');
     }
-  }, [user?.uid, passedReels, initialIndex, advancedVideoFetcher]);
+  }, [user?.uid, passedReels, passedReel, fromSearch, initialIndex, targetReelId, advancedVideoFetcher]);
 
   // Load next single reel when user scrolls - WITH FOLLOWING PRIORITY + Advanced Segmentation
   const loadNextReel = useCallback(async (index: number) => {

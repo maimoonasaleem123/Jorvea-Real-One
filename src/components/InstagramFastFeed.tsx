@@ -124,11 +124,54 @@ const convertToFirebasePost = (post: TypesPost): FirebasePost => {
   };
 };
 
-// Memoized Post Item for maximum performance
+// Memoized Post Item for maximum performance with real-time like updates
 const PostItem = memo<{ post: TypesPost; index: number }>(({ post, index }) => {
   const navigation = useNavigation();
   const { user } = useAuth();
-  const firebasePost = convertToFirebasePost(post);
+  
+  // ✅ Add real-time state for likes
+  const [realTimeLikesCount, setRealTimeLikesCount] = useState<number>(post.likes?.length || 0);
+  const [realTimeIsLiked, setRealTimeIsLiked] = useState<boolean>(false);
+  
+  // ✅ Subscribe to real-time updates for this post's likes
+  useEffect(() => {
+    if (!post.id || !user?.uid) return;
+    
+    const unsubscribePost = FirebaseService.subscribeToPost(post.id, (updatedPost) => {
+      if (updatedPost) {
+        console.log(`🔄 Real-time update for post ${post.id}: likesCount = ${updatedPost.likesCount}`);
+        setRealTimeLikesCount(updatedPost.likesCount || 0);
+      }
+    });
+    
+    const unsubscribeLike = FirebaseService.subscribeToUserLike(post.id, user.uid, 'post', (isLiked) => {
+      console.log(`❤️ Real-time like state for post ${post.id}: ${isLiked}`);
+      setRealTimeIsLiked(isLiked);
+    });
+    
+    // Initial fetch of like state
+    RealTimeLikeSystem.getInstance()
+      .getLikeState(post.id, user.uid, 'post')
+      .then(({ isLiked, likesCount }) => {
+        setRealTimeIsLiked(isLiked);
+        setRealTimeLikesCount(likesCount);
+      });
+    
+    return () => {
+      unsubscribePost?.();
+      unsubscribeLike?.();
+    };
+  }, [post.id, user?.uid]);
+  
+  // ✅ Use real-time data for Firebase post
+  const firebasePost = useMemo(() => {
+    const converted = convertToFirebasePost(post);
+    return {
+      ...converted,
+      likesCount: realTimeLikesCount,  // ✅ Use real-time count
+      isLiked: realTimeIsLiked,         // ✅ Use real-time like state
+    };
+  }, [post, realTimeLikesCount, realTimeIsLiked]);
   
   const handleShare = useCallback((post: FirebasePost) => {
     // Navigate to user search screen for sharing
@@ -148,25 +191,46 @@ const PostItem = memo<{ post: TypesPost; index: number }>(({ post, index }) => {
     
     try {
       console.log('❤️ RealTimeLike: Starting like toggle for post:', postId);
+      console.log('📍 Post ID:', postId);
+      console.log('👤 User ID:', user.uid);
+      
+      // Get current state from the post data
+      const currentPost = post;
+      const currentIsLiked = currentPost?.isLiked || false;
+      const currentLikesCount = currentPost?.likesCount || 0;
+      
+      console.log('📊 Current state - isLiked:', currentIsLiked, 'count:', currentLikesCount);
       
       // Use RealTimeLikeSystem for perfect like handling (same as ReelsScreen)
       const result = await RealTimeLikeSystem.getInstance().toggleLike(
         postId,
         user.uid,
         'post',
-        false, // We'll let the system determine current state
-        0      // We'll let the system fetch current count
+        currentIsLiked,     // ✅ Pass current state from post
+        currentLikesCount   // ✅ Pass current count from post
       );
 
       if (result.success) {
-        console.log(`✅ RealTimeLike: Post ${postId} ${result.isLiked ? 'liked' : 'unliked'}. Count: ${result.likesCount}`);
+        console.log(`✅ RealTimeLike SUCCESS: Post ${postId} ${result.isLiked ? 'LIKED ❤️' : 'UNLIKED 💔'}`);
+        console.log(`📈 Count updated: ${currentLikesCount} → ${result.likesCount}`);
+        console.log(`💾 Saved to Firebase: posts/${postId} - likesCount: ${result.likesCount}`);
+        console.log(`🔗 Like document: likes/${postId}_${user.uid} - ${result.isLiked ? 'CREATED ✅' : 'DELETED ❌'}`);
+        
+        // ✅ Force UI update by triggering a re-render (the real-time listener will update the count)
+        // This ensures the optimistic update matches Firebase reality
       } else {
-        console.log('⚠️ RealTimeLike: Like operation failed:', result.error);
+        console.error('⚠️ RealTimeLike FAILED:', result.error);
+        console.error('❌ Like was NOT saved to Firebase!');
       }
     } catch (error) {
-      console.error('❌ RealTimeLike: Error liking post:', error);
+      console.error('❌ RealTimeLike: Critical error liking post:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown',
+        postId,
+        userId: user.uid
+      });
     }
-  }, [user?.uid]);
+  }, [user?.uid, post]);
 
   const handleSave = useCallback(async (postId: string) => {
     if (!user?.uid) return;

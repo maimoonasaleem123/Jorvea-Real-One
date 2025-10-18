@@ -23,6 +23,7 @@ import { useNavigation } from '@react-navigation/native';
 import { launchImageLibrary, launchCamera, MediaType } from 'react-native-image-picker';
 import Video, { VideoRef } from 'react-native-video';
 import Slider from '@react-native-community/slider';
+import Toast from 'react-native-toast-message';
 import { useAuth } from '../context/FastAuthContext';
 import EnhancedReelsCamera from '../components/EnhancedReelsCamera';
 import DigitalOceanService from '../services/digitalOceanService';
@@ -380,6 +381,23 @@ export default function CreateReelScreen(): React.JSX.Element {
       return;
     }
 
+    // ✅ VALIDATE: Check video URI
+    if (!selectedVideo.uri) {
+      Alert.alert('Error', 'Invalid video file. Please try selecting again.');
+      return;
+    }
+
+    // ✅ VALIDATE: Check BackgroundVideoProcessor availability
+    if (!BackgroundVideoProcessor || typeof BackgroundVideoProcessor.getInstance !== 'function') {
+      console.error('❌ BackgroundVideoProcessor not available');
+      Alert.alert(
+        'Service Unavailable',
+        'Video processing service is not ready. Please restart the app.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setIsUploading(true);
     
     try {
@@ -388,16 +406,23 @@ export default function CreateReelScreen(): React.JSX.Element {
       console.log('👤 User ID:', user.uid);
       console.log('� Caption:', caption?.trim() || '(none)');
       
-      // ✅ VALIDATE: Check if BackgroundVideoProcessor is available
-      if (!BackgroundVideoProcessor || !BackgroundVideoProcessor.getInstance) {
-        console.error('❌ BackgroundVideoProcessor not available');
-        throw new Error('Video processing service not available. Please restart the app.');
+      // ✅ Get BackgroundVideoProcessor instance safely
+      console.log('📤 Getting video processor instance...');
+      let processor;
+      try {
+        processor = BackgroundVideoProcessor.getInstance();
+        if (!processor || typeof processor.addToQueue !== 'function') {
+          throw new Error('Processor instance is invalid');
+        }
+      } catch (err) {
+        console.error('❌ Failed to get processor instance:', err);
+        throw new Error('Video processing service not initialized properly. Please restart the app.');
       }
 
       console.log('📤 Adding video to background queue...');
       
       // Add to background processing queue with comprehensive error handling
-      const uploadId = await BackgroundVideoProcessor.getInstance().addToQueue(
+      const uploadId = await processor.addToQueue(
         selectedVideo.uri,
         user.uid,
         caption?.trim() || '' // ✅ FIXED: Safe caption handling with fallback
@@ -409,7 +434,7 @@ export default function CreateReelScreen(): React.JSX.Element {
       console.log('✅ Video added to background queue:', uploadId);
       console.log('🔔 User will be notified when upload completes!');
 
-      // Reset form
+      // ✅ Reset form state FIRST (before navigation)
       setSelectedVideo(null);
       setCaption('');
       setSelectedMusic(null);
@@ -417,23 +442,26 @@ export default function CreateReelScreen(): React.JSX.Element {
       setShowCaptionModal(false);
       setIsUploading(false);
 
-      // 🎉 Show success and return immediately!
-      Alert.alert(
-        '🎉 Reel Queued!',
-        'Your video is being processed in the background. You\'ll get a notification when it\'s live!\n\nYou can continue using the app normally.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              try {
-                navigation.goBack();
-              } catch (navError) {
-                console.error('Navigation error:', navError);
-              }
-            },
-          },
-        ]
-      );
+      // 🎉 Show success toast (non-blocking, won't cause Metro disconnection)
+      Toast.show({
+        type: 'success',
+        text1: '🎉 Reel Queued!',
+        text2: 'Processing in background. You\'ll get notified when ready!',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+
+      // ✅ Navigate back immediately
+      try {
+        // Small delay to ensure state updates complete
+        setTimeout(() => {
+          navigation.goBack();
+        }, 100);
+      } catch (navError) {
+        console.error('Navigation error:', navError);
+        // Fallback navigation
+        navigation.navigate('MainFlow' as never);
+      }
 
       return; // User can continue immediately!
 
@@ -530,6 +558,7 @@ export default function CreateReelScreen(): React.JSX.Element {
       console.error('Error message:', error?.message);
       console.error('Error stack:', error?.stack);
       
+      // ✅ Reset state immediately to prevent stuck UI
       setIsUploading(false);
       setShowCaptionModal(false);
       
@@ -556,25 +585,28 @@ export default function CreateReelScreen(): React.JSX.Element {
         }
       }
       
-      Alert.alert(
-        errorTitle, 
-        errorMessage,
-        [
-          {
-            text: 'Close',
-            onPress: () => {
-              // Try to go back safely
-              try {
-                navigation.goBack();
-              } catch (navError) {
-                console.error('Navigation error on close:', navError);
-              }
-            }
-          }
-        ]
-      );
+      // ✅ Show error toast (non-blocking)
+      console.error('🔴 Final error message:', errorMessage);
+      
+      Toast.show({
+        type: 'error',
+        text1: errorTitle,
+        text2: errorMessage,
+        position: 'top',
+        visibilityTime: 4000,
+      });
+      
+      // Navigate back after brief delay
+      try {
+        setTimeout(() => {
+          navigation.goBack();
+        }, 300);
+      } catch (navError) {
+        console.error('Navigation error on close:', navError);
+      }
+      
     } finally {
-      // Always reset uploading state
+      // ✅ Always reset uploading state (safety net)
       setIsUploading(false);
     }
   };

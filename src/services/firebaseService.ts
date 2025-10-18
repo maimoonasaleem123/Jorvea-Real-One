@@ -1872,6 +1872,49 @@ export class FirebaseService {
     }
   }
 
+  // ✅ Real-time Post Subscription for Like Updates
+  static subscribeToPost(postId: string, callback: (post: Post | null) => void) {
+    console.log(`📡 Subscribing to post updates: ${postId}`);
+    return firebaseFirestore
+      .collection(COLLECTIONS.POSTS)
+      .doc(postId)
+      .onSnapshot((doc) => {
+        if (doc.exists) {
+          const postData = { id: doc.id, ...doc.data() } as Post;
+          console.log(`🔄 Post ${postId} updated: likesCount = ${postData.likesCount}`);
+          callback(postData);
+        } else {
+          callback(null);
+        }
+      }, (error) => {
+        console.error(`❌ Error subscribing to post ${postId}:`, error);
+        callback(null);
+      });
+  }
+
+  // ✅ Real-time User Like Subscription
+  static subscribeToUserLike(
+    contentId: string, 
+    userId: string, 
+    contentType: 'post' | 'reel' | 'story',
+    callback: (isLiked: boolean) => void
+  ) {
+    const likeId = `${contentId}_${userId}`;
+    console.log(`📡 Subscribing to like state: ${likeId} (${contentType})`);
+    
+    return firebaseFirestore
+      .collection(COLLECTIONS.LIKES)
+      .doc(likeId)
+      .onSnapshot((doc) => {
+        const isLiked = doc.exists;
+        console.log(`❤️ Like state for ${contentId}: ${isLiked ? 'LIKED' : 'NOT LIKED'}`);
+        callback(isLiked);
+      }, (error) => {
+        console.error(`❌ Error subscribing to like ${likeId}:`, error);
+        callback(false);
+      });
+  }
+
   // Additional Comment Services for Live Comments
   static listenToComments(postId: string, callback: (comments: any[]) => void) {
     return firebaseFirestore
@@ -2079,41 +2122,96 @@ export class FirebaseService {
 
   static async getReels(limit: number = 20, lastDoc?: any, excludeUserId?: string): Promise<{ reels: Reel[], lastDoc: any, hasMore: boolean }> {
     try {
-      let query = firebaseFirestore
+      // 🎲 Instagram-style random reel fetching with smart algorithm
+      // Instead of always ordering by createdAt desc, we randomize while maintaining quality
+      
+      const currentTime = Date.now();
+      const oneDayAgo = currentTime - (24 * 60 * 60 * 1000);
+      const oneWeekAgo = currentTime - (7 * 24 * 60 * 60 * 1000);
+      
+      // 🎯 Strategy: Fetch from different time ranges and shuffle
+      let allReels: Reel[] = [];
+      
+      // Fetch recent reels (last 24 hours) - 40%
+      const recentQuery = firebaseFirestore
+        .collection(COLLECTIONS.REELS)
+        .where('createdAt', '>=', new Date(oneDayAgo).toISOString())
+        .limit(Math.ceil(limit * 0.4));
+      
+      // Fetch popular reels (last week, high engagement) - 30%
+      const popularQuery = firebaseFirestore
+        .collection(COLLECTIONS.REELS)
+        .where('createdAt', '>=', new Date(oneWeekAgo).toISOString())
+        .orderBy('likesCount', 'desc')
+        .limit(Math.ceil(limit * 0.3));
+      
+      // Fetch random older reels - 30%
+      const olderQuery = firebaseFirestore
         .collection(COLLECTIONS.REELS)
         .orderBy('createdAt', 'desc')
-        .limit(limit);
-
-      if (lastDoc) {
-        query = query.startAfter(lastDoc);
-      }
-
-      const reelsSnapshot = await query.get();
-      const reels: Reel[] = [];
-
-      for (const doc of reelsSnapshot.docs) {
-        const reelData = { id: doc.id, ...doc.data() } as Reel;
-        
-        // Skip current user's reels if excludeUserId is provided
-        if (excludeUserId && reelData.userId === excludeUserId) {
-          continue;
-        }
+        .limit(Math.ceil(limit * 0.3));
+      
+      // Fetch all in parallel for speed
+      const [recentSnapshot, popularSnapshot, olderSnapshot] = await Promise.all([
+        recentQuery.get(),
+        popularQuery.get(),
+        olderQuery.get()
+      ]);
+      
+      // Process recent reels
+      for (const doc of recentSnapshot.docs) {
+        const reelData = { id: doc.id, ...doc.data(), fetchType: 'recent' } as Reel & { fetchType: string };
+        if (excludeUserId && reelData.userId === excludeUserId) continue;
         
         if (reelData.userId) {
           const userData = await this.getUserProfile(reelData.userId);
-          if (userData) {
-            reelData.user = userData;
-          }
+          if (userData) reelData.user = userData;
         }
-        
-        // Add computed fields
         reelData.timeAgo = this.formatTimeAgo(reelData.createdAt);
-        
-        reels.push(reelData);
+        allReels.push(reelData);
       }
+      
+      // Process popular reels
+      for (const doc of popularSnapshot.docs) {
+        const reelData = { id: doc.id, ...doc.data(), fetchType: 'popular' } as Reel & { fetchType: string };
+        // Skip if already in recent
+        if (allReels.find(r => r.id === reelData.id)) continue;
+        if (excludeUserId && reelData.userId === excludeUserId) continue;
+        
+        if (reelData.userId) {
+          const userData = await this.getUserProfile(reelData.userId);
+          if (userData) reelData.user = userData;
+        }
+        reelData.timeAgo = this.formatTimeAgo(reelData.createdAt);
+        allReels.push(reelData);
+      }
+      
+      // Process older reels
+      for (const doc of olderSnapshot.docs) {
+        const reelData = { id: doc.id, ...doc.data(), fetchType: 'older' } as Reel & { fetchType: string };
+        // Skip if already in recent or popular
+        if (allReels.find(r => r.id === reelData.id)) continue;
+        if (excludeUserId && reelData.userId === excludeUserId) continue;
+        
+        if (reelData.userId) {
+          const userData = await this.getUserProfile(reelData.userId);
+          if (userData) reelData.user = userData;
+        }
+        reelData.timeAgo = this.formatTimeAgo(reelData.createdAt);
+        allReels.push(reelData);
+      }
+      
+      // 🎲 SHUFFLE for random order (Instagram-style)
+      allReels = this.shuffleArray(allReels);
+      
+      // Trim to requested limit
+      const reels = allReels.slice(0, limit);
+      
+      // For pagination, use the last reel's createdAt as cursor
+      const newLastDoc = reels.length > 0 ? reels[reels.length - 1] : null;
+      const hasMore = allReels.length >= limit;
 
-      const newLastDoc = reelsSnapshot.docs[reelsSnapshot.docs.length - 1];
-      const hasMore = reelsSnapshot.docs.length === limit;
+      console.log(`🎲 Fetched ${reels.length} randomized reels (Recent: ${recentSnapshot.size}, Popular: ${popularSnapshot.size}, Older: ${olderSnapshot.size})`);
 
       return {
         reels,
@@ -2124,6 +2222,16 @@ export class FirebaseService {
       console.error('Error fetching reels:', error);
       throw error;
     }
+  }
+  
+  // 🎲 Fisher-Yates shuffle algorithm for true randomization
+  private static shuffleArray<T>(array: T[]): T[] {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
   }
 
   static async createReel(reelData: Omit<Reel, 'id' | 'createdAt'>): Promise<string> {

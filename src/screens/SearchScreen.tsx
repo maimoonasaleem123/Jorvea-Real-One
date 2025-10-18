@@ -143,13 +143,14 @@ const SearchScreen: React.FC = () => {
   const handleReelPress = useCallback((reel: Reel, index: number) => {
     console.log('🎬 Opening reel from search:', reel.id);
     
-    // Instagram-style: Navigate to Reels with specific reel
-    // Filter reels for Instagram-like experience
-    const searchReels = exploreReels.filter(r => r.id === reel.id || true); // Start with current reel
-    
+    // 🎯 Instagram-style: Make clicked reel the FIRST reel, then load others
+    // This ensures the clicked reel plays immediately at index 0
     navigation.navigate('Reels', { 
       initialReelId: reel.id,
-      reelsList: searchReels 
+      focusedReelId: reel.id, // Mark this as the focused reel
+      passedReel: reel, // Pass the full reel object for instant display
+      fromSearch: true, // Mark that this came from search
+      initialIndex: 0 // Always start at index 0 (the clicked reel)
     });
   }, [navigation, exploreReels]);
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, Image } from 'react-native';
 import Video, { VideoRef, OnLoadData, OnProgressData, OnBufferData } from 'react-native-video';
 
 interface InstagramVideoPlayerProps {
@@ -19,9 +19,10 @@ interface InstagramVideoPlayerProps {
 
 /**
  * 🚀 INSTAGRAM-STYLE VIDEO PLAYER
+ * - Shows THUMBNAIL immediately (no black screen)
+ * - Transitions to video once loaded
  * - NO loading indicators
  * - NO buffering overlays
- * - NO CC/settings/HLS indicators
  * - INSTANT playback like Instagram
  * - Clean, minimal, FAST
  */
@@ -40,22 +41,39 @@ const InstagramVideoPlayer: React.FC<InstagramVideoPlayerProps> = ({
   style,
 }) => {
   const videoRef = useRef<VideoRef>(null);
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const [showThumbnail, setShowThumbnail] = useState(true);
   
   // Detect HLS format
   const isHLS = videoUrl?.toLowerCase().includes('.m3u8') || videoUrl?.toLowerCase().includes('/hls/');
+
+  // Reset thumbnail when video URL changes
+  useEffect(() => {
+    setShowThumbnail(true);
+    setVideoLoaded(false);
+  }, [videoUrl]);
 
   // Handle video load
   const handleLoad = useCallback((data: OnLoadData) => {
     if (__DEV__) {
       console.log(`✅ Video loaded: ${isHLS ? 'HLS' : 'Direct'} | Duration: ${data.duration}s`);
     }
+    setVideoLoaded(true);
+    // Hide thumbnail after video starts playing
+    setTimeout(() => {
+      setShowThumbnail(false);
+    }, 100);
     onLoad?.(data);
   }, [isHLS, onLoad]);
 
   // Handle progress
   const handleProgress = useCallback((data: OnProgressData) => {
+    // Hide thumbnail once video starts playing
+    if (data.currentTime > 0.1 && showThumbnail) {
+      setShowThumbnail(false);
+    }
     onProgress?.(data);
-  }, [onProgress]);
+  }, [onProgress, showThumbnail]);
 
   // Handle buffering (silent - no UI)
   const handleBuffer = useCallback((data: OnBufferData) => {
@@ -75,6 +93,15 @@ const InstagramVideoPlayer: React.FC<InstagramVideoPlayerProps> = ({
 
   return (
     <View style={[styles.container, style]}>
+      {/* 🖼️ INSTAGRAM-STYLE: Show thumbnail immediately to avoid black screen */}
+      {showThumbnail && thumbnailUrl && (
+        <Image
+          source={{ uri: thumbnailUrl }}
+          style={styles.thumbnail}
+          resizeMode={resizeMode}
+        />
+      )}
+      
       <Video
         ref={videoRef}
         source={{ 
@@ -87,7 +114,7 @@ const InstagramVideoPlayer: React.FC<InstagramVideoPlayerProps> = ({
             },
           }),
         }}
-        style={styles.video}
+        style={[styles.video, showThumbnail && styles.videoHidden]}
         paused={paused}
         muted={muted}
         repeat={repeat}
@@ -151,10 +178,22 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#000',
   },
+  thumbnail: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#000',
+    zIndex: 1,
+  },
   video: {
     width: '100%',
     height: '100%',
     backgroundColor: '#000',
+  },
+  videoHidden: {
+    opacity: 0,
   },
 });
 

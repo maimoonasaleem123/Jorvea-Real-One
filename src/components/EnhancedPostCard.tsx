@@ -26,6 +26,16 @@ const isSmallScreen = width < 350;
 const cardMaxWidth = isTablet ? 500 : width;
 const mediaHeight = isSmallScreen ? width * 0.75 : width;
 
+// Format count like Instagram/TikTok (1.2K, 5.3M)
+const formatCount = (count: number): string => {
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1)}M`;
+  } else if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K`;
+  }
+  return count.toString();
+};
+
 interface EnhancedPostCardProps {
   post: Post;
   onLike: (postId: string) => void;
@@ -385,33 +395,51 @@ export const EnhancedPostCard: React.FC<EnhancedPostCardProps> = ({
       {/* Post Media */}
       {renderMedia()}
 
-      {/* Post Actions */}
+      {/* Post Actions - Instagram Style with Counts */}
       <View style={styles.postActions}>
         <View style={styles.leftActions}>
-          {/* Instagram-Style Animated Like Button */}
-          <Animated.View
-            style={{
-              transform: [{ scale: likeButtonAnimation }]
-            }}>
+          {/* Like Button with Count */}
+          <View style={styles.actionWithCount}>
+            <Animated.View
+              style={{
+                transform: [{ scale: likeButtonAnimation }]
+              }}>
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={handleLikePress}
+                activeOpacity={0.7}
+                disabled={likeAnimating}>
+                <MaterialIcon
+                  name={optimisticLikeState.isLiked ? "favorite" : "favorite-border"}
+                  size={30}
+                  color={optimisticLikeState.isLiked ? "#ff3040" : "#262626"}
+                />
+              </TouchableOpacity>
+            </Animated.View>
+            {/* Always show count, even if 0 */}
+            <Text style={[
+              styles.actionCount,
+              optimisticLikeState.isOptimistic && { opacity: 0.8 }
+            ]}>
+              {formatCount(optimisticLikeState.likesCount)}
+            </Text>
+          </View>
+          
+          {/* Comment Button with Count */}
+          <View style={styles.actionWithCount}>
             <TouchableOpacity 
               style={styles.actionButton}
-              onPress={handleLikePress}
-              activeOpacity={0.7}
-              disabled={likeAnimating}>
-              <MaterialIcon
-                name={optimisticLikeState.isLiked ? "favorite" : "favorite-border"}
-                size={30}
-                color={optimisticLikeState.isLiked ? "#ff3040" : "#262626"}
-              />
+              onPress={() => onComment(post)}
+            >
+              <Icon name="chatbubble-outline" size={28} color="#262626" />
             </TouchableOpacity>
-          </Animated.View>
+            {/* Always show count, even if 0 */}
+            <Text style={styles.actionCount}>
+              {formatCount(post.commentsCount || 0)}
+            </Text>
+          </View>
           
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => onComment(post)}
-          >
-            <Icon name="chatbubble-outline" size={28} color="#262626" />
-          </TouchableOpacity>
+          {/* Share Button */}
           <TouchableOpacity 
             style={styles.actionButton}
             onPress={() => onShare(post)}
@@ -444,15 +472,6 @@ export const EnhancedPostCard: React.FC<EnhancedPostCardProps> = ({
       {/* Post Info */}
       {showFullContent && (
         <View style={styles.postInfo}>
-          {optimisticLikeState.likesCount > 0 && (
-            <Text style={[
-              styles.likesCount,
-              optimisticLikeState.isOptimistic && { opacity: 0.8 }
-            ]}>
-              {optimisticLikeState.likesCount.toLocaleString()} likes
-            </Text>
-          )}
-          
           {post.caption && (
             <View style={styles.captionContainer}>
               <Text style={styles.caption}>
@@ -476,14 +495,6 @@ export const EnhancedPostCard: React.FC<EnhancedPostCardProps> = ({
                 </TouchableOpacity>
               ))}
             </View>
-          )}
-
-          {post.commentsCount > 0 && (
-            <TouchableOpacity onPress={() => onComment(post)}>
-              <Text style={styles.viewComments}>
-                View all {post.commentsCount} comments
-              </Text>
-            </TouchableOpacity>
           )}
 
           <Text style={styles.timeAgo}>
@@ -677,8 +688,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 18,
   },
+  actionWithCount: {
+    alignItems: 'center',
+  },
   actionButton: {
     padding: 6,
+  },
+  actionCount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#262626',
+    marginTop: 2,
   },
   postInfo: {
     paddingHorizontal: 16,

@@ -23,6 +23,8 @@ interface SharedReelMessageProps {
     user: any;
     duration?: number;
     likes?: string[];
+    likesCount?: number;
+    commentsCount?: number;
     views?: number;
     createdAt?: Date;
   };
@@ -39,6 +41,8 @@ interface SharedPostMessageProps {
     userId: string;
     user: any;
     likes?: string[];
+    likesCount?: number;
+    commentsCount?: number;
     createdAt?: Date;
   };
   message?: string;
@@ -149,9 +153,17 @@ export const SharedReelMessage: React.FC<SharedReelMessageProps> = ({
             <View style={styles.statItem}>
               <Icon name="heart" size={14} color="#FF3B30" />
               <Text style={styles.statText}>
-                {formatViews(reelData.likes?.length || 0)}
+                {formatViews(reelData.likesCount || reelData.likes?.length || 0)}
               </Text>
             </View>
+            {reelData.commentsCount !== undefined && reelData.commentsCount > 0 && (
+              <View style={styles.statItem}>
+                <Icon name="chatbubble" size={14} color="#8E8E93" />
+                <Text style={styles.statText}>
+                  {formatViews(reelData.commentsCount)}
+                </Text>
+              </View>
+            )}
             <View style={styles.statItem}>
               <Icon name="eye" size={14} color="#8E8E93" />
               <Text style={styles.statText}>
@@ -264,14 +276,22 @@ export const SharedPostMessage: React.FC<SharedPostMessageProps> = ({
             <View style={styles.statItem}>
               <Icon name="heart" size={14} color="#FF3B30" />
               <Text style={styles.statText}>
-                {formatLikes(postData.likes?.length || 0)}
+                {formatLikes(postData.likesCount || postData.likes?.length || 0)}
               </Text>
             </View>
+            {postData.commentsCount !== undefined && postData.commentsCount > 0 && (
+              <View style={styles.statItem}>
+                <Icon name="chatbubble" size={14} color="#8E8E93" />
+                <Text style={styles.statText}>
+                  {formatLikes(postData.commentsCount)}
+                </Text>
+              </View>
+            )}
             {hasMultipleImages && (
               <View style={styles.statItem}>
                 <Icon name="images" size={14} color="#8E8E93" />
                 <Text style={styles.statText}>
-                  {postData.mediaUrls.length} photos
+                  {postData.mediaUrls.length}
                 </Text>
               </View>
             )}
