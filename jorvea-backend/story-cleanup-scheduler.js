@@ -8,7 +8,7 @@
 const cron = require('node-cron');
 const axios = require('axios');
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://jorvea-jgg3d.ondigitalocean.app';
 const CLEANUP_SCHEDULE = '0 * * * *'; // Every hour at minute 0
 
 /**

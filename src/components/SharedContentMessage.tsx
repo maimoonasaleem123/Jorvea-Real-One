@@ -58,11 +58,13 @@ export const SharedReelMessage: React.FC<SharedReelMessageProps> = ({
     if (onPress) {
       onPress();
     } else {
-      // Navigate to ReelsScreen with specific reel
-      (navigation as any).navigate('ReelsScreen', {
+      // Navigate to ReelsScreen with return context
+      // User can press back to return to chat
+      (navigation as any).navigate('Reels', {
         initialReelId: reelData.id,
         focusedReelId: reelData.id,
         userId: reelData.userId,
+        returnTo: 'Chat', // Mark where to return
       });
     }
   };

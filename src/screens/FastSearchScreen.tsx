@@ -304,13 +304,16 @@ const FastSearchScreen: React.FC = () => {
         fromSearch: true,
       });
     } else if (item.type === 'reel') {
-      // Navigate to ReelsScreen like TikTok/Instagram
+      // Navigate to Reels tab (Instagram-like) with return to search
       const reel = item.data as Reel;
-      (navigation as any).navigate('ReelsScreen', {
+      const allReels = exploreContent.filter(c => c.type === 'reel').map(c => c.data as Reel);
+      const reelIndex = allReels.findIndex(r => r.id === reel.id);
+      
+      (navigation as any).navigate('Reels', {
         initialReelId: reel.id,
-        fromSearch: true,
-        reels: exploreContent.filter(c => c.type === 'reel').map(c => c.data as Reel),
-        initialIndex: exploreContent.filter(c => c.type === 'reel').findIndex(c => c.id === reel.id),
+        reels: allReels,
+        initialIndex: reelIndex >= 0 ? reelIndex : 0,
+        returnTo: 'Search', // Mark to return to search screen
       });
     }
   }, [navigation, exploreContent]);

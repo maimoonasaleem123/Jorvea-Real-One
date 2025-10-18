@@ -290,7 +290,9 @@ const PerfectUserProfileScreen: React.FC = () => {
   const handleReelPress = (index: number) => {
     navigation.navigate('Reels', {
       initialReelId: content.reels[index].id,
-      reelsList: content.reels,
+      reels: content.reels,
+      initialIndex: index,
+      returnTo: 'UserProfile', // Mark to return to user profile
     });
   };
 

@@ -98,34 +98,62 @@ class BackgroundVideoProcessor {
     userId: string,
     caption: string
   ): Promise<string> {
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    try {
+      console.log('📋 BackgroundVideoProcessor.addToQueue called');
+      console.log('📹 Video URI:', videoUri);
+      console.log('👤 User ID:', userId);
+      console.log('📝 Caption:', caption || '(empty)');
+      
+      // Validate inputs
+      if (!videoUri) {
+        throw new Error('Video URI is required');
+      }
+      if (!userId) {
+        throw new Error('User ID is required');
+      }
+      
+      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-    const job: VideoJob = {
-      id: jobId,
-      videoUri,
-      userId,
-      caption,
-      status: 'queued',
-      progress: 0,
-      createdAt: new Date(),
-    };
+      const job: VideoJob = {
+        id: jobId,
+        videoUri,
+        userId,
+        caption: caption || '', // Ensure caption is never undefined
+        status: 'queued',
+        progress: 0,
+        createdAt: new Date(),
+      };
 
-    this.queue.push(job);
-    console.log('📋 Added to queue:', jobId);
+      this.queue.push(job);
+      console.log('✅ Added to queue:', jobId);
+      console.log('📊 Queue length:', this.queue.length);
 
-    // Show notification
-    this.showNotification(
-      'Video Upload Started',
-      'Your reel is being processed in the background. You can continue using the app!',
-      false
-    );
+      // Show notification
+      try {
+        this.showNotification(
+          'Video Upload Started',
+          'Your reel is being processed in the background. You can continue using the app!',
+          false
+        );
+      } catch (notifError) {
+        console.warn('⚠️ Notification error (non-critical):', notifError);
+      }
 
-    // Start processing if not already running
-    if (!this.isProcessing) {
-      this.startBackgroundProcessing();
+      // Start processing if not already running
+      if (!this.isProcessing) {
+        console.log('🚀 Starting background processing...');
+        this.startBackgroundProcessing().catch(err => {
+          console.error('❌ Background processing error:', err);
+        });
+      } else {
+        console.log('⏳ Background processing already running');
+      }
+
+      return jobId;
+    } catch (error) {
+      console.error('❌ CRITICAL ERROR in addToQueue:', error);
+      throw error;
     }
-
-    return jobId;
   }
 
   /**

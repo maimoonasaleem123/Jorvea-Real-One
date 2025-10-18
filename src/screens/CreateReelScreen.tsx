@@ -80,14 +80,18 @@ export default function CreateReelScreen(): React.JSX.Element {
   const videoRef = useRef<VideoRef>(null);
   
   // Video states
-    const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null);
   const [recordedVideo, setRecordedVideo] = useState<SelectedVideo | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadPhase, setUploadPhase] = useState('');
   const [caption, setCaption] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState('');
   
   // UI states
   const [showCaptionModal, setShowCaptionModal] = useState(false);
@@ -247,31 +251,47 @@ export default function CreateReelScreen(): React.JSX.Element {
         const asset = response.assets[0];
         if (asset.uri && asset.type && asset.fileName) {
           
-          // Process video silently in background
-          setIsUploading(true); // Show loading indicator instead of alert
+          // Show processing indicator
+          setIsProcessing(true);
+          setProcessingMessage('📹 Analyzing video...');
           
           try {
             // Validate video duration and properties
             const validation = await VideoCompressor.validateVideo(asset.uri);
             
             if (!validation.isValid) {
-              setIsUploading(false);
+              setIsProcessing(false);
               Alert.alert('Invalid Video', validation.error || 'Please select a different video.');
               return;
             }
 
-            // Automatically trim if longer than 60 seconds (no user intervention needed)
             let processedUri = asset.uri;
-            if (validation.duration && validation.duration > 60) {
-              console.log('🎬 Auto-trimming video to 60 seconds...');
-              processedUri = await VideoCompressor.trimVideoTo60Seconds(asset.uri, validation.duration);
+            const videoDuration = validation.duration || 0;
+
+            // Automatically trim if longer than 60 seconds
+            if (videoDuration > 60) {
+              setProcessingMessage(`⏱️ Trimming video from ${Math.round(videoDuration)}s to 60s...`);
+              console.log(`🎬 Auto-trimming video from ${videoDuration}s to 60 seconds...`);
+              
+              // Trim video to 60 seconds
+              processedUri = await VideoCompressor.trimVideoTo60Seconds(asset.uri, videoDuration);
+              
+              // Show success message
+              Alert.alert(
+                '✂️ Video Trimmed',
+                `Your ${Math.round(videoDuration)}s video has been trimmed to 60 seconds for Instagram Reels format.`,
+                [{ text: 'OK' }]
+              );
             }
 
-            // Process video with compression in background
-            await processVideoWithCompression({ ...asset, uri: processedUri }, Math.min(validation.duration || 0, 60));
+            // Process video with compression
+            await processVideoWithCompression(
+              { ...asset, uri: processedUri }, 
+              Math.min(videoDuration, 60)
+            );
 
           } catch (error) {
-            setIsUploading(false);
+            setIsProcessing(false);
             console.error('Error processing video:', error);
             Alert.alert('Error', 'Failed to process video. Please try again.');
           }
@@ -282,36 +302,56 @@ export default function CreateReelScreen(): React.JSX.Element {
 
   const processVideoWithCompression = async (asset: any, duration: number) => {
     try {
-      // Compress video for optimal upload - all processing happens silently
-      const compressionResult = await VideoCompressor.compressVideo(asset.uri);
+      setProcessingMessage('🗜️ Optimizing video quality...');
+      
+      // Compress video for optimal upload
+      const compressionResult = await VideoCompressor.compressVideo(asset.uri, (progress) => {
+        setProcessingMessage(`🗜️ Compressing video... ${progress}%`);
+      });
       
       if (!compressionResult.success) {
-        setIsUploading(false);
-        Alert.alert('Compression Failed', compressionResult.error || 'Failed to optimize video.');
+        setIsProcessing(false);
+        Alert.alert('Optimization Failed', compressionResult.error || 'Failed to optimize video.');
         return;
       }
 
-      // Log compression results for debugging (no user alerts)
+      // Log compression results
       if (compressionResult.originalSize && compressionResult.compressedSize) {
         const compressionRatio = ((compressionResult.originalSize - compressionResult.compressedSize) / compressionResult.originalSize * 100).toFixed(1);
-        console.log(`🎬 Video compressed: ${compressionRatio}% size reduction`);
+        const originalSizeMB = (compressionResult.originalSize / (1024 * 1024)).toFixed(1);
+        const compressedSizeMB = (compressionResult.compressedSize / (1024 * 1024)).toFixed(1);
+        
+        console.log(`✅ Video optimized: ${originalSizeMB}MB → ${compressedSizeMB}MB (${compressionRatio}% reduction)`);
+        
+        // Show optimization success
+        if (compressionResult.originalSize > 10 * 1024 * 1024) { // Show only for large videos
+          Alert.alert(
+            '✅ Video Optimized!',
+            `Original: ${originalSizeMB}MB\nOptimized: ${compressedSizeMB}MB\nSaved: ${compressionRatio}%`,
+            [{ text: 'Great!' }]
+          );
+        }
       }
 
-      // Set the compressed video
+      // Set the optimized video
       setSelectedVideo({
         uri: compressionResult.compressedUri || asset.uri,
         duration: Math.min(duration, 60), // Cap at 60 seconds
         type: asset.type,
         fileName: asset.fileName,
-        fileSize: compressionResult.compressedSize,
+        fileSize: compressionResult.compressedSize || asset.fileSize,
         thumbnailUrl: compressionResult.compressedUri || asset.uri,
       });
+      
       setIsPlaying(true);
-      setIsUploading(false); // Hide loading indicator
+      setProcessingMessage('');
+      setIsProcessing(false);
+      
+      console.log('✅ Video ready for upload!');
 
     } catch (error) {
-      setIsUploading(false);
-      console.error('Error compressing video:', error);
+      setIsProcessing(false);
+      console.error('Error processing video:', error);
       Alert.alert('Error', 'Failed to optimize video. Please try again.');
     }
   };
@@ -336,34 +376,46 @@ export default function CreateReelScreen(): React.JSX.Element {
 
   const createReel = async () => {
     if (!selectedVideo || !user) {
+      Alert.alert('Error', 'Please select a video first');
       return;
     }
 
     setIsUploading(true);
     
     try {
-      // 🎉 NEW: Background processing - user never waits!
-      console.log('📤 Starting background HLS conversion...');
-      console.log('⚡ User can continue using app immediately!');
+      console.log('� Starting reel creation...');
+      console.log('📹 Video URI:', selectedVideo.uri);
+      console.log('👤 User ID:', user.uid);
+      console.log('� Caption:', caption?.trim() || '(none)');
       
-      // Add to background processing queue
+      // ✅ VALIDATE: Check if BackgroundVideoProcessor is available
+      if (!BackgroundVideoProcessor || !BackgroundVideoProcessor.getInstance) {
+        console.error('❌ BackgroundVideoProcessor not available');
+        throw new Error('Video processing service not available. Please restart the app.');
+      }
+
+      console.log('📤 Adding video to background queue...');
+      
+      // Add to background processing queue with comprehensive error handling
       const uploadId = await BackgroundVideoProcessor.getInstance().addToQueue(
         selectedVideo.uri,
         user.uid,
-        caption.trim() // Just pass caption string
-      );
+        caption?.trim() || '' // ✅ FIXED: Safe caption handling with fallback
+      ).catch((queueError) => {
+        console.error('❌ Failed to add to queue:', queueError);
+        throw new Error(`Queue error: ${queueError.message || 'Unknown error'}`);
+      });
 
       console.log('✅ Video added to background queue:', uploadId);
       console.log('🔔 User will be notified when upload completes!');
-      console.log('💰 Cost: $0.00 (100% FREE forever!)');
 
       // Reset form
-      setIsUploading(false);
       setSelectedVideo(null);
       setCaption('');
       setSelectedMusic(null);
       setTextOverlays([]);
       setShowCaptionModal(false);
+      setIsUploading(false);
 
       // 🎉 Show success and return immediately!
       Alert.alert(
@@ -371,12 +423,14 @@ export default function CreateReelScreen(): React.JSX.Element {
         'Your video is being processed in the background. You\'ll get a notification when it\'s live!\n\nYou can continue using the app normally.',
         [
           {
-            text: 'View Queue',
-            onPress: () => navigation.navigate('UploadQueue' as never),
-          },
-          {
             text: 'OK',
-            onPress: () => navigation.goBack(),
+            onPress: () => {
+              try {
+                navigation.goBack();
+              } catch (navError) {
+                console.error('Navigation error:', navError);
+              }
+            },
           },
         ]
       );
@@ -470,21 +524,58 @@ export default function CreateReelScreen(): React.JSX.Element {
       // ============================================================
       
     } catch (error) {
-      console.error('Error creating reel:', error);
+      console.error('❌❌❌ CRITICAL ERROR creating reel:', error);
+      console.error('Error type:', typeof error);
+      console.error('Error name:', error?.name);
+      console.error('Error message:', error?.message);
+      console.error('Error stack:', error?.stack);
+      
+      setIsUploading(false);
+      setShowCaptionModal(false);
       
       let errorMessage = 'Failed to create reel. Please try again.';
+      let errorTitle = 'Upload Failed';
+      
       if (error instanceof Error) {
+        console.error('Error instance details:', {
+          message: error.message,
+          name: error.name,
+          stack: error.stack
+        });
+        
         if (error.message.includes('file size')) {
-          errorMessage = 'Video file is too large. Please try a shorter video or contact support.';
+          errorMessage = 'Video file is too large. Please try a shorter video.';
         } else if (error.message.includes('network')) {
           errorMessage = 'Network error. Please check your connection and try again.';
+        } else if (error.message.includes('processing service')) {
+          errorMessage = 'Video processing service unavailable. Please restart the app.';
+        } else if (error.message.includes('Queue error')) {
+          errorMessage = `Upload queue error: ${error.message}`;
+        } else {
+          errorMessage = `Error: ${error.message}\n\nPlease try again or restart the app.`;
         }
       }
       
-      Alert.alert('Upload Failed', errorMessage);
+      Alert.alert(
+        errorTitle, 
+        errorMessage,
+        [
+          {
+            text: 'Close',
+            onPress: () => {
+              // Try to go back safely
+              try {
+                navigation.goBack();
+              } catch (navError) {
+                console.error('Navigation error on close:', navError);
+              }
+            }
+          }
+        ]
+      );
     } finally {
+      // Always reset uploading state
       setIsUploading(false);
-      setShowCaptionModal(false);
     }
   };
 
@@ -1159,6 +1250,36 @@ export default function CreateReelScreen(): React.JSX.Element {
           }
         }}
       />
+
+      {/* Processing/Upload Overlay */}
+      {(isProcessing || isUploading) && (
+        <View style={styles.processingOverlay}>
+          <View style={styles.processingContainer}>
+            <ActivityIndicator size="large" color="#E1306C" />
+            <Text style={styles.processingTitle}>
+              {isProcessing ? '🎬 Processing Video' : '📤 Uploading Reel'}
+            </Text>
+            <Text style={styles.processingMessage}>
+              {processingMessage || uploadPhase || 'Please wait...'}
+            </Text>
+            {uploadProgress > 0 && (
+              <View style={styles.progressBarContainer}>
+                <View 
+                  style={[
+                    styles.uploadProgressBar, 
+                    { width: `${uploadProgress}%` }
+                  ]} 
+                />
+              </View>
+            )}
+            <Text style={styles.processingHint}>
+              {isProcessing 
+                ? '✂️ Auto-trimming and optimizing your video...' 
+                : '🚀 Your reel will be ready soon!'}
+            </Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1629,6 +1750,77 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
+  },
+  toggleIndicatorActive: {
+    alignSelf: 'flex-end',
+  },
+  reelGuideText: {
+    fontSize: 14,
+    color: '#ffffff',
+    opacity: 0.9,
+    textAlign: 'center',
+    marginVertical: 8,
+    paddingHorizontal: 20,
+  },
+  // Processing Overlay Styles
+  processingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  processingContainer: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: width * 0.8,
+    maxWidth: width * 0.9,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  processingTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginTop: 20,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  processingMessage: {
+    fontSize: 16,
+    color: '#E1306C',
+    marginBottom: 16,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  processingHint: {
+    fontSize: 14,
+    color: '#999999',
+    marginTop: 16,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  progressBarContainer: {
+    width: '100%',
+    height: 6,
+    backgroundColor: '#333333',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  uploadProgressBar: {
+    height: '100%',
+    backgroundColor: '#E1306C',
+    borderRadius: 3,
   },
   toggleIndicatorActive: {
     transform: [{ translateX: 20 }],

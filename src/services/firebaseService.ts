@@ -1496,6 +1496,17 @@ export class FirebaseService {
     }
   }
 
+  static async checkIfReelLiked(reelId: string, userId: string): Promise<boolean> {
+    try {
+      const likeDocRef = firebaseFirestore.collection(COLLECTIONS.LIKES).doc(`${reelId}_${userId}`);
+      const likeDoc = await likeDocRef.get();
+      return likeDoc.exists();
+    } catch (error) {
+      console.error('Error checking if reel is liked:', error);
+      return false;
+    }
+  }
+
   static async getPostLikes(postId: string): Promise<User[]> {
     try {
       const likesSnapshot = await firebaseFirestore
@@ -1961,17 +1972,11 @@ export class FirebaseService {
         }
       }
       
-      // Get discover posts (from non-followed users)
-      const discoverQuery = followingIds.length > 0 
-        ? firebaseFirestore
-            .collection(COLLECTIONS.POSTS)
-            .where('userId', 'not-in', followingIds.slice(0, 10)) // Firestore limit
-            .orderBy('createdAt', 'desc')
-            .limit(Math.ceil(limit * 0.3)) // 30% discover content
-        : firebaseFirestore
-            .collection(COLLECTIONS.POSTS)
-            .orderBy('createdAt', 'desc')
-            .limit(limit);
+      // Get discover posts (simple query - no complex indexes needed)
+      const discoverQuery = firebaseFirestore
+        .collection(COLLECTIONS.POSTS)
+        .orderBy('createdAt', 'desc')
+        .limit(Math.ceil(limit * 0.3)); // 30% discover content
             
       const discoverSnapshot = await discoverQuery.get();
       const discoverPosts: Post[] = [];
@@ -2621,16 +2626,39 @@ export class FirebaseService {
 
   private static async uploadStoryMedia(uri: string): Promise<string> {
     try {
-      // Enhanced upload logic with progress tracking
-      // For now returning the URI - implement Firebase Storage upload as needed
-      console.log('Uploading story media:', uri);
+      console.log('📸 Uploading story media to DigitalOcean Spaces:', uri);
       
-      // Simulate upload delay for better UX
-      await new Promise<void>(resolve => setTimeout(resolve, 1000));
+      // Get current user for upload path
+      const currentUser = firebaseAuth.currentUser;
+      if (!currentUser) {
+        throw new Error('User must be authenticated to upload story media');
+      }
       
-      return uri;
+      // Detect media type from URI
+      const isVideo = uri.toLowerCase().includes('.mp4') || 
+                     uri.toLowerCase().includes('.mov') || 
+                     uri.toLowerCase().includes('video');
+      const mediaType = isVideo ? 'video' : 'image';
+      const extension = isVideo ? 'mp4' : 'jpg';
+      const mimeType = isVideo ? 'video/mp4' : 'image/jpeg';
+      
+      console.log(`📤 Uploading story ${mediaType} to DigitalOcean Spaces...`);
+      
+      // Generate unique filename for DigitalOcean
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2, 15);
+      const fileName = `stories/${currentUser.uid}/${timestamp}_${randomId}.${extension}`;
+      
+      // Import DigitalOceanService dynamically
+      const { DigitalOceanService } = await import('./digitalOceanService');
+      
+      // Upload to DigitalOcean Spaces
+      const mediaUrl = await DigitalOceanService.uploadMedia(uri, fileName, mimeType);
+      
+      console.log('✅ Story media uploaded to DigitalOcean successfully:', mediaUrl);
+      return mediaUrl;
     } catch (error) {
-      console.error('Error uploading story media:', error);
+      console.error('❌ Error uploading story media to DigitalOcean:', error);
       throw error;
     }
   }

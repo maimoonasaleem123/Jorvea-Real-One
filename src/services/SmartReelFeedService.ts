@@ -85,7 +85,10 @@ class SmartReelFeedService {
       console.log(`✅ Smart feed generated: ${unwatchedReels.length} reels`);
       console.log(`📊 Composition: Following=${followingReels.length}, Trending=${trendingReels.length}, High Engagement=${highEngagementReels.length}, Personalized=${personalizedReels.length}, Discovery=${discoveryReels.length}`);
 
-      return unwatchedReels.slice(0, limit);
+      // ✅ Enrich reels with like status
+      const enrichedReels = await this.enrichReelsWithLikeStatus(unwatchedReels.slice(0, limit), userId);
+
+      return enrichedReels;
     } catch (error) {
       console.error('❌ Error generating smart feed:', error);
       // Fallback to simple recent reels
@@ -132,7 +135,7 @@ class SmartReelFeedService {
         .limit(limit)
         .get();
 
-      return reelsSnapshot.docs.map(doc => {
+      const reels = reelsSnapshot.docs.map(doc => {
         const data = doc.data();
         const createdAt = data.createdAt?.toDate ? data.createdAt.toDate() : 
                          data.createdAt instanceof Date ? data.createdAt : 
@@ -143,6 +146,9 @@ class SmartReelFeedService {
           createdAt,
         } as Reel;
       });
+
+      // Enrich with like status
+      return await this.enrichReelsWithLikeStatus(reels, userId);
     } catch (error) {
       console.error('Error getting following reels:', error);
       return [];
@@ -498,7 +504,7 @@ class SmartReelFeedService {
         .limit(limit)
         .get();
 
-      return reelsSnapshot.docs.map(doc => {
+      const reels = reelsSnapshot.docs.map(doc => {
         const data = doc.data();
         const createdAt = data.createdAt?.toDate ? data.createdAt.toDate() : 
                          data.createdAt instanceof Date ? data.createdAt : 
@@ -509,6 +515,9 @@ class SmartReelFeedService {
           createdAt,
         } as Reel;
       });
+
+      // Enrich with like status
+      return await this.enrichReelsWithLikeStatus(reels, userId);
     } catch (error) {
       console.error('Error getting fallback reels:', error);
       return [];
@@ -520,6 +529,88 @@ class SmartReelFeedService {
    */
   clearWatchHistory(userId: string): void {
     this.userWatchHistory.delete(userId);
+  }
+
+  /**
+   * ✅ Enrich reels with like status and user data
+   */
+  private async enrichReelsWithLikeStatus(reels: Reel[], userId: string): Promise<Reel[]> {
+    try {
+      // Check like status and load user data for all reels in parallel
+      const enrichedReels = await Promise.all(
+        reels.map(async (reel) => {
+          try {
+            // Check if user liked this reel AND load user profile data
+            const [likeDoc, userDoc] = await Promise.all([
+              firestore()
+                .collection('likes')
+                .doc(`${reel.id}_${userId}`)
+                .get(),
+              firestore()
+                .collection('users')
+                .doc(reel.userId)
+                .get()
+            ]);
+
+            const userData = userDoc.exists ? userDoc.data() : null;
+
+            return {
+              ...reel,
+              isLiked: likeDoc.exists(), // Call exists() as a method
+              user: userData ? {
+                id: reel.userId,
+                uid: reel.userId,
+                username: userData.username || userData.displayName || 'user',
+                displayName: userData.displayName || userData.username || 'User',
+                profilePicture: userData.profilePicture || userData.photoURL || null,
+                verified: userData.verified || false,
+                isFollowing: false // Will be updated later if needed
+              } : {
+                id: reel.userId,
+                uid: reel.userId,
+                username: `user${reel.userId.slice(-4)}`,
+                displayName: 'User',
+                profilePicture: null,
+                verified: false,
+                isFollowing: false
+              }
+            };
+          } catch (error) {
+            console.error(`Error checking like status for reel ${reel.id}:`, error);
+            return {
+              ...reel,
+              isLiked: false,
+              user: {
+                id: reel.userId,
+                uid: reel.userId,
+                username: `user${reel.userId.slice(-4)}`,
+                displayName: 'User',
+                profilePicture: null,
+                verified: false,
+                isFollowing: false
+              }
+            };
+          }
+        })
+      );
+
+      return enrichedReels;
+    } catch (error) {
+      console.error('Error enriching reels with like status:', error);
+      return reels.map(reel => ({ 
+        ...reel, 
+        isLiked: false,
+        user: {
+          id: reel.userId,
+          uid: reel.userId,
+          username: `user${reel.userId.slice(-4)}`,
+          displayName: 'User',
+          profilePicture: null,
+          verified: false,
+          isFollowing: false
+        }
+      }));
+    }
   }
 }
 

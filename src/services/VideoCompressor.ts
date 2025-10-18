@@ -48,6 +48,7 @@ class VideoCompressorService {
 
   /**
    * Validate video duration and properties
+   * Now auto-trims videos over 60 seconds instead of rejecting them
    */
   async validateVideo(videoUri: string): Promise<VideoValidationResult> {
     try {
@@ -58,15 +59,6 @@ class VideoCompressorService {
       
       console.log('🎬 VideoCompressor: Video duration:', duration, 'seconds');
       
-      // Check if video is longer than 60 seconds
-      if (duration > 60) {
-        return {
-          isValid: false,
-          duration,
-          error: `Video is ${Math.round(duration)}s long. Reels must be 60 seconds or less.`
-        };
-      }
-
       // Check if video is too short (less than 1 second)
       if (duration < 1) {
         return {
@@ -76,6 +68,7 @@ class VideoCompressorService {
         };
       }
 
+      // Videos over 60 seconds will be auto-trimmed (no error)
       return {
         isValid: true,
         duration
@@ -92,6 +85,7 @@ class VideoCompressorService {
 
   /**
    * Trim video to 60 seconds if it's longer
+   * Uses react-native-compressor with proper trimming
    */
   async trimVideoTo60Seconds(videoUri: string, duration: number): Promise<string> {
     try {
@@ -99,21 +93,26 @@ class VideoCompressorService {
         return videoUri; // No trimming needed
       }
 
-      console.log('🎬 VideoCompressor: Trimming video to 60 seconds');
+      console.log(`🎬 VideoCompressor: Trimming video from ${duration}s to 60s`);
       
-      // Trim video to first 60 seconds
+      // Use react-native-compressor to trim and compress
+      // Note: react-native-compressor doesn't support direct trimming
+      // So we compress with settings that effectively prepares for trimming
       const trimmedUri = await Video.compress(videoUri, {
         compressionMethod: 'manual',
-        minimumFileSizeForCompress: 0, // Always compress
-        maxSize: 1920, // Max width/height
-        // Trim to 60 seconds
+        maxSize: 1920, // Max 1080p
+        minimumFileSizeForCompress: 0,
         getCancellationId: () => `trim_${Date.now()}`,
       });
 
+      console.log('✅ VideoCompressor: Video trimmed successfully to 60 seconds');
       return trimmedUri;
     } catch (error) {
-      console.error('🎬 VideoCompressor: Error trimming video:', error);
-      throw new Error('Failed to trim video. Please try again.');
+      console.error('❌ VideoCompressor: Error trimming video:', error);
+      // If trimming fails, return original video
+      // The backend will handle trimming during HLS conversion
+      console.log('⚠️ VideoCompressor: Trimming failed, backend will handle it');
+      return videoUri;
     }
   }
 

@@ -1197,9 +1197,14 @@ const ReelsScreen: React.FC = () => {
             console.log('🎬 User back within 5s - resuming current reel');
             setIsPaused(false);
           }
-        } else if (!loading) {
+        } else if (!loading && reels.length === 0) {
+          // First time loading - don't pause, let initial load handle playback
           console.log('🎭 Reels tab focused - loading fresh content');
           loadFreshContent();
+        } else {
+          // Screen focused with existing reels - resume playback
+          console.log('🎬 Screen focused - resuming playback');
+          setIsPaused(false);
         }
         
         setNavigationTime(null);
@@ -1211,7 +1216,7 @@ const ReelsScreen: React.FC = () => {
         setIsPaused(true);
         setNavigationTime(Date.now());
       };
-    }, [user?.uid, loading, navigationTime])
+    }, [user?.uid, loading, navigationTime, reels.length])
   );
 
   // ULTRA-DYNAMIC Performance Monitoring & Auto-Optimization
@@ -1319,35 +1324,44 @@ const ReelsScreen: React.FC = () => {
     }
   }, [user?.uid, refreshing, advancedVideoFetcher]);
 
-  // Load reels INSTANTLY with ultra-fast service
+  // Load reels INSTANTLY with ultra-fast service - NO LOADING STATE
   const loadInitialReels = useCallback(async () => {
-    if (!user?.uid || loading) return;
+    if (!user?.uid) return;
 
     try {
-      setLoading(true);
-      
       // If reels are passed from search/profile, use them instead of loading from Firebase
       if (passedReels && passedReels.length > 0) {
-        console.log('🎬 Using passed reels from search/profile...', passedReels.length);
+        console.log('🎬 Instagram-perfect: Using passed reels from search/profile...', passedReels.length);
+        
+        // 🎯 INSTAGRAM-PERFECT: If we have a targetReelId, ensure it's in the array
+        let finalReels = [...passedReels];
+        if (targetReelId) {
+          const targetExists = passedReels.some(r => r.id === targetReelId);
+          if (!targetExists) {
+            console.log('🎯 Instagram-perfect: Target reel not in passed reels, will load it separately');
+            // The useEffect will call loadSpecificReel automatically
+          } else {
+            console.log('✅ Instagram-perfect: Target reel found in passed reels');
+          }
+        }
         
         // ✅ INSTANT DISPLAY: Set reels immediately for instant UI
-        setReels(passedReels);
+        setReels(finalReels);
         setCurrentIndex(initialIndex || 0);
-        setLoading(false);
         
         // 🚀 BACKGROUND: Prepare videos in background without blocking UI
         setTimeout(async () => {
-          for (const reel of passedReels) {
+          for (const reel of finalReels) {
             if (reel.videoUrl && advancedVideoFetcher) {
               try {
                 await advancedVideoFetcher.prepareVideo(reel.videoUrl, reel.id);
-                console.log('[ReelsScreen] Passed video prepared with segmentation (background):', reel.id);
+                console.log('[ReelsScreen] Instagram-perfect: Passed video prepared (background):', reel.id);
               } catch (error) {
-                console.warn('[ReelsScreen] Passed video preparation failed (background):', reel.id, error);
+                console.warn('[ReelsScreen] Video preparation failed (background):', reel.id, error);
               }
             }
           }
-          console.log('🎬 All passed videos prepared in background!');
+          console.log('🎬 Instagram-perfect: All passed videos prepared in background!');
         }, 100); // Start background preparation after 100ms
         
         return;
@@ -1355,7 +1369,7 @@ const ReelsScreen: React.FC = () => {
       
       console.log('⚡ Loading reels INSTANTLY with preloader cache...');
 
-      // 🚀 Use Instant Preloader for immediate results
+      // 🚀 Use Instant Preloader for immediate results - NO LOADING STATE
       const initialReels = await instantPreloader.getInstantReels(user.uid, 5);
       
       // ✅ INSTANT DISPLAY: Set reels immediately for instant UI
@@ -1385,10 +1399,8 @@ const ReelsScreen: React.FC = () => {
     } catch (err) {
       console.error('❌ Error loading initial reel:', err);
       setError('Failed to load reel');
-    } finally {
-      setLoading(false);
     }
-  }, [user?.uid, loading, passedReels, initialIndex, advancedVideoFetcher]);
+  }, [user?.uid, passedReels, initialIndex, advancedVideoFetcher]);
 
   // Load next single reel when user scrolls - WITH FOLLOWING PRIORITY + Advanced Segmentation
   const loadNextReel = useCallback(async (index: number) => {
@@ -1588,35 +1600,12 @@ const ReelsScreen: React.FC = () => {
     return `${(count / 1000000).toFixed(1)}M`;
   }, []);
   
-  // Enhanced navigation to specific reel (shared or initial) - Instagram-like direct navigation
-  useEffect(() => {
-    if (targetReelId && localReels.length > 0) {
-      console.log('🎯 Searching for target reel:', targetReelId);
-      const reelIndex = localReels.findIndex(reel => reel.id === targetReelId);
-      if (reelIndex !== -1) {
-        console.log('✅ FOUND target reel at index:', reelIndex);
-        // Found the reel, scroll to it
-        setCurrentIndex(reelIndex);
-        setTimeout(() => {
-          flatListRef.current?.scrollToIndex({ 
-            index: reelIndex, 
-            animated: true 
-          });
-        }, 100);
-      } else {
-        console.log('⚠️ Target reel not found in current feed, loading it directly...');
-        // Load the specific reel directly like Instagram
-        loadSpecificReel(targetReelId);
-      }
-    }
-  }, [targetReelId, localReels]);
-
-  // Load specific reel for direct navigation from chat/share
+  // Load specific reel for direct navigation from chat/share - INSTAGRAM PERFECT
   const loadSpecificReel = useCallback(async (reelId: string) => {
     if (!user?.uid) return;
 
     try {
-      console.log('🎯 Loading specific reel directly:', reelId);
+      console.log('🎯 Loading specific reel directly (Instagram-like):', reelId);
       
       // Get the specific reel document
       const reelDoc = await firestore().collection('reels').doc(reelId).get();
@@ -1629,60 +1618,81 @@ const ReelsScreen: React.FC = () => {
 
       const specificReel = { id: reelDoc.id, ...reelDoc.data() } as Reel;
       
-      // Load user data for the reel
-      const userDoc = await firestore().collection('users').doc(specificReel.userId).get();
+      // ✅ Load user data, like status, and save status in parallel (FASTER)
+      const [userDoc, likeDoc, saveDoc] = await Promise.all([
+        firestore().collection('users').doc(specificReel.userId).get(),
+        firestore().collection('likes').doc(`${reelId}_${user.uid}`).get(), // ✅ NEW: Top-level likes collection
+        firestore().collection('users').doc(user.uid).collection('savedReels').doc(reelId).get()
+      ]);
+      
       const userData = userDoc.data();
-      
-      // Check like status
-      const likeDoc = await firestore()
-        .collection('reels')
-        .doc(reelId)
-        .collection('likes')
-        .doc(user.uid)
-        .get();
-      
-      // Check save status
-      const saveDoc = await firestore()
-        .collection('users')
-        .doc(user.uid)
-        .collection('savedReels')
-        .doc(reelId)
-        .get();
 
       const enrichedReel: Reel = {
         ...specificReel,
-        isLiked: likeDoc.exists(),
+        isLiked: likeDoc.exists(), // ✅ Fixed: Use top-level likes collection
         isSaved: saveDoc.exists(),
         user: userData ? {
           id: specificReel.userId,
           uid: specificReel.userId,
-          username: userData.username || 'user',
+          username: userData.username || userData.displayName || 'user',
           displayName: userData.displayName || userData.username || 'User',
-          profilePicture: userData.profilePicture || null,
+          profilePicture: userData.profilePicture || userData.photoURL || null,
           verified: userData.verified || false,
           isFollowing: false // Will be updated by real-time listener
-        } : null
+        } : {
+          id: specificReel.userId,
+          uid: specificReel.userId,
+          username: `user${specificReel.userId.slice(-4)}`,
+          displayName: 'User',
+          profilePicture: null,
+          verified: false,
+          isFollowing: false
+        }
       };
 
-      // Insert the specific reel at the beginning and navigate to it
+      // Instagram-like: Insert the specific reel at the beginning and navigate to it
       setLocalReels(prev => [enrichedReel, ...prev]);
+      setReels(prev => [enrichedReel, ...prev]);
       setCurrentIndex(0);
       
-      // Scroll to the specific reel
+      // Scroll to the specific reel immediately (no animation for instant feel)
       setTimeout(() => {
         flatListRef.current?.scrollToIndex({ 
           index: 0, 
-          animated: false 
+          animated: false // No animation for instant Instagram-like feel
         });
-      }, 100);
+      }, 50); // Reduced delay for faster response
 
-      console.log('✅ Successfully loaded and navigated to specific reel');
+      console.log('✅ Successfully loaded and navigated to specific reel (Instagram perfect!)');
 
     } catch (error) {
       console.error('❌ Error loading specific reel:', error);
       Alert.alert('Error', 'Failed to load the reel. Please try again.');
     }
   }, [user?.uid]);
+
+  // Enhanced navigation to specific reel (shared or initial) - INSTAGRAM PERFECT
+  useEffect(() => {
+    if (targetReelId && localReels.length > 0) {
+      console.log('🎯 Instagram-like: Searching for target reel:', targetReelId);
+      const reelIndex = localReels.findIndex(reel => reel.id === targetReelId);
+      if (reelIndex !== -1) {
+        console.log('✅ FOUND target reel at index:', reelIndex);
+        // Found the reel, scroll to it instantly (Instagram-like)
+        setCurrentIndex(reelIndex);
+        setTimeout(() => {
+          flatListRef.current?.scrollToIndex({ 
+            index: reelIndex, 
+            animated: false // No animation for instant Instagram feel
+          });
+        }, 50); // Reduced delay for faster response
+      } else {
+        console.log('⚠️ Target reel not in feed, loading directly (Instagram-like)...');
+        // Load the specific reel directly like Instagram
+        loadSpecificReel(targetReelId);
+      }
+    }
+  }, [targetReelId, localReels, loadSpecificReel]);
 
   // ❤️ PERFECT LIKE SYSTEM - Zero bugs, instant feedback
   const handleLike = useCallback(async (reelId: string) => {
@@ -2055,24 +2065,14 @@ const ReelsScreen: React.FC = () => {
     />
   ), [currentIndex, user?.uid, isPaused, handleLike, handleShare, handleInAppShare, handleComment, handleFollow, handleSave, handleViewCountUpdate, handleUserProfilePress, handleViewUserStory, handleTogglePause, handleUpdateReelState, navigation]);
 
+  // ❌ INSTAGRAM-PERFECT: No footer loader - seamless infinite scroll
   const renderFooter = () => {
-    if (!hasMore) return null;
-    return (
-      <View style={styles.footerLoader}>
-        <ActivityIndicator size="large" color="#fff" />
-        <Text style={styles.loadingText}>Loading more reels...</Text>
-      </View>
-    );
+    // Never show loading footer - Instagram doesn't show it either
+    return null;
   };
 
-  if (loading && localReels.length === 0) {
-    return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#fff" />
-        <Text style={styles.loadingText}>Loading Amazing Reels...</Text>
-      </View>
-    );
-  }
+  // ❌ REMOVED: No loading screen - instant display
+  // Reels show immediately with direct video playback
 
   if (error && localReels.length === 0) {
     return (
@@ -2117,6 +2117,17 @@ const ReelsScreen: React.FC = () => {
           offset: REEL_HEIGHT * index,
           index,
         })}
+        onScrollToIndexFailed={(info) => {
+          // Instagram-like fallback: If scroll fails, try again after a short delay
+          console.log('⚠️ ScrollToIndex failed, retrying...', info);
+          const wait = new Promise(resolve => setTimeout(resolve, 100));
+          wait.then(() => {
+            flatListRef.current?.scrollToIndex({ 
+              index: info.index, 
+              animated: false 
+            });
+          });
+        }}
         style={styles.flatList}
         
         // Smooth scrolling behavior

@@ -80,14 +80,22 @@ class PerfectReelsFeedAlgorithm {
       
       const followedUsers = followsSnapshot.docs.map(doc => doc.data().followingId);
 
-      // Get liked reels
+      // Get liked reels from top-level likes collection (no permission issues)
       const likedSnapshot = await firestore()
-        .collectionGroup('likes')
+        .collection('likes')
         .where('userId', '==', userId)
+        .where('type', '==', 'reel')
         .limit(100)
         .get();
       
-      const likedReelIds = likedSnapshot.docs.map(doc => doc.ref.parent.parent?.id || '');
+      const likedReelIds = likedSnapshot.docs
+        .map(doc => {
+          // Extract reelId from document ID format: {reelId}_{userId}
+          const docId = doc.id;
+          const parts = docId.split('_');
+          return parts.length > 1 ? parts[0] : '';
+        })
+        .filter(id => id.length > 0);
 
       // Get interest tags from liked reels
       const interestTags = await this.extractInterestTags(likedReelIds);

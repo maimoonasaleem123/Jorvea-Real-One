@@ -98,39 +98,40 @@ const InstagramVideoPlayer: React.FC<InstagramVideoPlayerProps> = ({
         onError={handleError}
         onEnd={onEnd}
         
-        // ⚡ INSTAGRAM-OPTIMIZED BUFFER CONFIG
+        // ⚡ ULTRA-FAST CHUNK-BASED LOADING - Instagram/TikTok Style
+        // Start playback INSTANTLY with minimal buffering
         bufferConfig={{
-          minBufferMs: 1000,              // Minimal pre-buffering
-          bufferForPlaybackMs: 100,       // ULTRA LOW - instant start
-          maxBufferMs: 5000,              // Small buffer for fast startup
-          bufferForPlaybackAfterRebufferMs: 500,
-          cacheSizeMB: 200,
+          minBufferMs: 500,               // Minimum buffer: 0.5s
+          bufferForPlaybackMs: 50,        // Start after 50ms (INSTANT!)
+          maxBufferMs: 3000,              // Max buffer: 3s (load in chunks)
+          bufferForPlaybackAfterRebufferMs: 200, // Fast rebuffer
+          cacheSizeMB: 100,               // Moderate cache
         }}
         
-        // HLS settings
-        preferredForwardBufferDuration={isHLS ? 3 : 5}
-        maxBitRate={isHLS ? 0 : 2000000}  // Let HLS decide adaptively
-        automaticallyWaitsToMinimizeStalling={false}
+        // HLS adaptive streaming settings
+        preferredForwardBufferDuration={isHLS ? 2 : 3}  // 2-3 seconds ahead
+        maxBitRate={isHLS ? 0 : 1500000}  // Let HLS decide quality adaptively
+        automaticallyWaitsToMinimizeStalling={false}   // Don't wait - play now!
         progressUpdateInterval={250}
         reportBandwidth={true}
         
-        // Platform-specific
+        // Performance optimization
         playInBackground={false}
         playWhenInactive={false}
         ignoreSilentSwitch="ignore"
         mixWithOthers="mix"
         
-        // iOS
+        // iOS specific
         allowsExternalPlayback={false}
         
-        // Android (ExoPlayer)
-        useTextureView={false}
+        // Android ExoPlayer optimization
+        useTextureView={false}           // Faster rendering
         disableFocus={true}
         
         // NO CONTROLS - Instagram style
         controls={false}
         
-        // Poster disabled for instant playback
+        // NO poster for instant playback
         poster=""
         posterResizeMode="cover"
       />

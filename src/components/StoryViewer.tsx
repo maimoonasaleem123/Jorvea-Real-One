@@ -191,10 +191,23 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
               resizeMode="cover"
               repeat={false}
               paused={isPaused}
-              onLoad={() => setLoading(false)}
-              onError={() => {
+              onLoad={() => {
+                console.log('✅ Story video loaded successfully:', currentStory.mediaUrl);
                 setLoading(false);
-                Alert.alert('Error', 'Failed to load story');
+              }}
+              onError={(error) => {
+                console.error('❌ Story video load error:', error);
+                console.error('❌ Video URL:', currentStory.mediaUrl);
+                console.error('❌ Story data:', JSON.stringify(currentStory, null, 2));
+                setLoading(false);
+                Alert.alert(
+                  'Video Load Error', 
+                  `Failed to load story video.\n\nURL: ${currentStory.mediaUrl?.substring(0, 50)}...\n\nPlease check if the video was uploaded correctly.`,
+                  [
+                    { text: 'Skip', onPress: goToNextStory },
+                    { text: 'Close', onPress: onClose }
+                  ]
+                );
               }}
             />
           ) : (
@@ -202,10 +215,23 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
               source={{ uri: currentStory.mediaUrl }}
               style={styles.media}
               resizeMode="cover"
-              onLoad={() => setLoading(false)}
-              onError={() => {
+              onLoad={() => {
+                console.log('✅ Story image loaded successfully:', currentStory.mediaUrl);
                 setLoading(false);
-                Alert.alert('Error', 'Failed to load story');
+              }}
+              onError={(error) => {
+                console.error('❌ Story image load error:', error);
+                console.error('❌ Image URL:', currentStory.mediaUrl);
+                console.error('❌ Story data:', JSON.stringify(currentStory, null, 2));
+                setLoading(false);
+                Alert.alert(
+                  'Image Load Error',
+                  `Failed to load story image.\n\nURL: ${currentStory.mediaUrl?.substring(0, 50)}...\n\nPlease check if the image was uploaded correctly.`,
+                  [
+                    { text: 'Skip', onPress: goToNextStory },
+                    { text: 'Close', onPress: onClose }
+                  ]
+                );
               }}
             />
           )}

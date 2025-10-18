@@ -640,12 +640,12 @@ const ProfileScreen: React.FC = () => {
               userId={profile.uid}
               isOwnProfile={true}
               onReelPress={(reel, index) => {
-                // Navigate to ReelsScreen with perfect Instagram-like experience
-                (navigation as any).navigate('ReelsScreen', {
+                // Navigate to Reels tab (Instagram-like) with return to profile
+                (navigation as any).navigate('Reels', {
                   initialReelId: reel.id,
-                  fromProfile: true,
                   reels: userReels,
                   initialIndex: index,
+                  returnTo: 'Profile', // Mark to return to profile screen
                 });
               }}
             />
